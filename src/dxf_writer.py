@@ -56,18 +56,19 @@ def build_dxf(
 
     document = ezdxf.new(dxfversion="R2010", setup=True, units=ezdxf.units.MM)
     document.header["$INSUNITS"] = ezdxf.units.MM
+    document.header["$LWDISPLAY"] = 1  # que AutoCAD muestre los grosores de línea por capa
 
     layers = document.layers
     if LAYER_LINES not in layers:
         layers.add(name=LAYER_LINES, color=7)
     if LAYER_TRACE not in layers:
-        layers.add(name=LAYER_TRACE, color=8)
+        layers.add(name=LAYER_TRACE, color=8, lineweight=13)
     if LAYER_WALLS not in layers:
-        layers.add(name=LAYER_WALLS, color=7)
+        layers.add(name=LAYER_WALLS, color=7, lineweight=50)
     if LAYER_ARCS not in layers:
-        layers.add(name=LAYER_ARCS, color=7)
+        layers.add(name=LAYER_ARCS, color=7, lineweight=25)
     if LAYER_AXES not in layers:
-        layers.add(name=LAYER_AXES, color=1, linetype="CENTER")
+        layers.add(name=LAYER_AXES, color=1, linetype="CENTER", lineweight=18)
 
     modelspace = document.modelspace()
 

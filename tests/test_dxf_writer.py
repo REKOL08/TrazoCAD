@@ -79,3 +79,15 @@ def test_build_dxf_escribe_arcos_y_circulos(tmp_path: Path) -> None:
     assert arc[0].dxf.layer == LAYER_ARCS
     assert abs(arc[0].dxf.radius - 10.0) < 0.05  # 118.1 px a 300 dpi = 10 mm
     assert abs(arc[0].dxf.start_angle - 10.0) < 1e-6
+
+
+def test_las_capas_llevan_grosor_de_linea(tmp_path: Path) -> None:
+    from src.dxf_writer import LAYER_AXES, LAYER_WALLS
+
+    salida = tmp_path / "grosores.dxf"
+    build_dxf([], dpi=300, image_height_px=1000, output_path=salida)
+
+    documento = ezdxf.readfile(salida)
+    assert documento.layers.get(LAYER_WALLS).dxf.lineweight == 50
+    assert documento.layers.get(LAYER_AXES).dxf.lineweight == 18
+    assert documento.header["$LWDISPLAY"] == 1
