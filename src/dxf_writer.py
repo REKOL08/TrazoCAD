@@ -14,6 +14,7 @@ from pathlib import Path
 
 import ezdxf
 
+from .arcos import Arc
 from .line_detector import Segment
 from .vectorizer import Polyline
 
@@ -23,6 +24,7 @@ LAYER_LINES = "LINEAS_DETECTADAS"
 LAYER_TRACE = "CALCADO_REFERENCIA"
 LAYER_WALLS = "MUROS"
 LAYER_AXES = "EJES"
+LAYER_ARCS = "ARCOS"
 MM_PER_INCH = 25.4
 
 
@@ -38,6 +40,7 @@ def build_dxf(
     polylines: list[Polyline] | None = None,
     walls: list[Segment] | None = None,
     axes: list[Segment] | None = None,
+    arcs: list[Arc] | None = None,
 ) -> Path:
     """Escribe `segments` y `polylines` (en píxeles) en un DXF nuevo.
 
@@ -49,6 +52,7 @@ def build_dxf(
     polylines = polylines or []
     walls = walls or []
     axes = axes or []
+    arcs = arcs or []
 
     document = ezdxf.new(dxfversion="R2010", setup=True, units=ezdxf.units.MM)
     document.header["$INSUNITS"] = ezdxf.units.MM
@@ -60,6 +64,8 @@ def build_dxf(
         layers.add(name=LAYER_TRACE, color=8)
     if LAYER_WALLS not in layers:
         layers.add(name=LAYER_WALLS, color=7)
+    if LAYER_ARCS not in layers:
+        layers.add(name=LAYER_ARCS, color=7)
     if LAYER_AXES not in layers:
         layers.add(name=LAYER_AXES, color=1, linetype="CENTER")
 
@@ -77,6 +83,16 @@ def build_dxf(
     for (x1, y1), (x2, y2) in axes:
         modelspace.add_line(to_mm(x1, y1), to_mm(x2, y2), dxfattribs={"layer": LAYER_AXES})
 
+    for arc in arcs:
+        centre = to_mm(arc.cx, arc.cy)
+        radius = _px_to_mm(arc.radius, dpi)
+        if arc.is_circle:
+            modelspace.add_circle(centre, radius, dxfattribs={"layer": LAYER_ARCS})
+        else:
+            modelspace.add_arc(
+                centre, radius, arc.start_deg, arc.end_deg, dxfattribs={"layer": LAYER_ARCS}
+            )
+
     for polyline in polylines:
         modelspace.add_lwpolyline(
             [to_mm(x, y) for x, y in polyline],
@@ -87,11 +103,12 @@ def build_dxf(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     document.saveas(output_path)
     logger.info(
-        "DXF generado: %s (%d líneas, %d muros, %d ejes, %d trazos de referencia)",
+        "DXF generado: %s (%d líneas, %d muros, %d ejes, %d arcos, %d trazos de referencia)",
         output_path,
         len(segments),
         len(walls),
         len(axes),
+        len(arcs),
         len(polylines),
     )
     return output_path

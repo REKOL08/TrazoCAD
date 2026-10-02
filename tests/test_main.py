@@ -36,9 +36,9 @@ def test_main_guarda_resultados_en_subcarpeta_del_programa(
     assert exit_code == 0
     salida_dir = programa_dir / OUTPUT_SUBFOLDER_NAME
     assert salida_dir.is_dir()
-    assert (salida_dir / "plano.dxf").exists()
+    assert len(list(salida_dir.glob("plano_*.dxf"))) == 1
     # No debe dejar nada suelto junto al PDF original.
-    assert not (entrada_dir / "plano.dxf").exists()
+    assert not list(entrada_dir.glob("*.dxf"))
     assert not (entrada_dir / OUTPUT_SUBFOLDER_NAME).exists()
 
 
@@ -54,24 +54,21 @@ def test_rotate_image_gira_en_sentido_antihorario() -> None:
     assert rotate_image(imagen, 180).shape == (2, 4)
 
 
-def test_convert_pdf_no_falla_si_el_dxf_anterior_esta_en_uso(tmp_path: Path) -> None:
-    import os
-
-    from src.converter import convert_pdf
+def test_cada_conversion_genera_un_archivo_nuevo_con_hora(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src import converter
 
     pdf_path = tmp_path / "plano.pdf"
     _crear_pdf_sintetico(pdf_path)
     salida = tmp_path / "salida"
-    salida.mkdir()
-    bloqueado = salida / "plano.dxf"
-    bloqueado.write_text("en uso")
-    os.chmod(bloqueado, 0o444)  # en Windows equivale a un archivo que no se puede sobrescribir
+    marcas = iter(["20261002_100000", "20261002_100001"])
+    monkeypatch.setattr(converter, "_timestamp", lambda: next(marcas))
 
-    try:
-        resultado = convert_pdf(pdf_path, salida, dpi=150, generate_dwg=False)
-    finally:
-        os.chmod(bloqueado, 0o666)
+    primero = converter.convert_pdf(pdf_path, salida, dpi=150, generate_dwg=False)
+    segundo = converter.convert_pdf(pdf_path, salida, dpi=150, generate_dwg=False)
 
-    assert resultado.success
-    assert resultado.outputs[0].name != "plano.dxf"
-    assert resultado.outputs[0].exists()
+    assert primero.success and segundo.success
+    assert primero.outputs[0].name == "plano_20261002_100000.dxf"
+    assert segundo.outputs[0].name == "plano_20261002_100001.dxf"
+    assert primero.outputs[0].exists() and segundo.outputs[0].exists()

@@ -61,3 +61,21 @@ def test_build_dxf_escribe_muros_y_ejes_en_sus_capas(tmp_path: Path) -> None:
     assert capas.count(LAYER_WALLS) == 2
     assert capas.count(LAYER_AXES) == 1
     assert documento.layers.get(LAYER_AXES).dxf.linetype == "CENTER"
+
+
+def test_build_dxf_escribe_arcos_y_circulos(tmp_path: Path) -> None:
+    from src.arcos import Arc
+    from src.dxf_writer import LAYER_ARCS
+
+    salida = tmp_path / "arcos.dxf"
+    arcos = [Arc(500.0, 500.0, 118.1, 10.0, 100.0), Arc(900.0, 500.0, 59.0, 0.0, 360.0)]
+
+    build_dxf([], dpi=300, image_height_px=1000, output_path=salida, arcs=arcos)
+
+    modelspace = ezdxf.readfile(salida).modelspace()
+    arc = list(modelspace.query("ARC"))
+    circulos = list(modelspace.query("CIRCLE"))
+    assert len(arc) == 1 and len(circulos) == 1
+    assert arc[0].dxf.layer == LAYER_ARCS
+    assert abs(arc[0].dxf.radius - 10.0) < 0.05  # 118.1 px a 300 dpi = 10 mm
+    assert abs(arc[0].dxf.start_angle - 10.0) < 1e-6

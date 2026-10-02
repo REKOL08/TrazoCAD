@@ -35,6 +35,11 @@ def rotate_image(image: np.ndarray, degrees_ccw: int) -> np.ndarray:
     return np.ascontiguousarray(np.rot90(image, degrees_ccw // 90))
 
 
+def _timestamp() -> str:
+    """Marca de tiempo para el nombre del archivo: cada conversión es un archivo nuevo."""
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
 @dataclass
 class ConversionResult:
     pdf_path: Path
@@ -72,6 +77,7 @@ def convert_pdf(
             polylines: list = []
             walls: list = []
             axes: list = []
+            arcs: list = []
             if mode == MODE_LINES:
                 segments = detect_lines(image)
                 segments = merge_collinear_segments(segments, dpi=page.dpi)
@@ -79,12 +85,12 @@ def convert_pdf(
                     segments, min_length_mm=min_length_mm, dpi=page.dpi
                 )
             else:
-                walls, axes = detect_walls_and_axes(
+                walls, axes, arcs = detect_walls_and_axes(
                     image, page.dpi, ignore_bottom_fraction=ignore_bottom_fraction
                 )
                 if not clean_only:
                     polylines = trace_ink(image, dpi=page.dpi)
-            if not segments and not polylines and not walls and not axes:
+            if not segments and not polylines and not walls and not axes and not arcs:
                 logger.warning(
                     "'%s' página %d: no se detectó geometría; se omite esta página.",
                     pdf_path.name,
@@ -93,7 +99,9 @@ def convert_pdf(
                 continue
 
             suffix = "" if len(pages) == 1 else f"_p{page.page_number}"
-            dxf_path = output_dir / f"{pdf_path.stem}{suffix}.dxf"
+            # nombre único por conversión: nunca se pisa un DXF que AutoCAD,
+            # OneDrive o el antivirus puedan tener bloqueado
+            dxf_path = output_dir / f"{pdf_path.stem}{suffix}_{_timestamp()}.dxf"
             try:
                 build_dxf(
                     segments,
@@ -103,6 +111,7 @@ def convert_pdf(
                     polylines=polylines,
                     walls=walls,
                     axes=axes,
+                    arcs=arcs,
                 )
             except PermissionError:
                 # El DXF anterior suele estar abierto en AutoCAD y Windows no
@@ -121,6 +130,7 @@ def convert_pdf(
                     polylines=polylines,
                     walls=walls,
                     axes=axes,
+                    arcs=arcs,
                 )
             outputs.append(dxf_path)
 

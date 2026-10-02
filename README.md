@@ -12,9 +12,10 @@ El DXF que se genera tiene **capas**, para poder ver solo lo limpio o todo:
 
 | Capa | Qué contiene | Calidad |
 |---|---|---|
-| `MUROS` | Caras de muros como líneas **rectas, paralelas y enderezadas** (horizontal/vertical exactas), con esquinas prolongadas hasta cruzarse | Limpia, pero **parcial**: solo muros rectos; faltan tramos y los arcos salen en trozos rectos |
+| `MUROS` | Caras de muros como líneas **rectas, paralelas y enderezadas** (horizontal/vertical exactas), con esquinas prolongadas hasta cruzarse y los extremos libres cerrados con un remate | Limpia, pero **parcial**: faltan tramos, y a veces entran líneas de cotas o muebles que parecen muro |
+| `ARCOS` | Arcos y círculos reales (`ARC`/`CIRCLE`): muros curvos, puertas batientes, escaleras circulares | Buena en curvas grandes; puede haber algún arco falso o faltar uno |
 | `EJES` | Ejes largos de trazo y punto (tipo de línea `CENTER`) | Limpia, pero **incompleta**: detecta algunos, no todos |
-| `CALCADO_REFERENCIA` | Calco fiel de toda la tinta del escaneo (textos, símbolos, cotas, curvas) como polilíneas | Se ve como el PDF, pero con trazos quebrados; es una **referencia para calcar encima**, apágala (`LAYER OFF`) para ver solo lo limpio |
+| `CALCADO_REFERENCIA` | Calco fiel de toda la tinta del escaneo (textos, símbolos, cotas, curvas) como polilíneas, con las líneas largas suavizadas y enderezadas | Se ve como el PDF; es una **referencia para calcar encima**, apágala (`LAYER OFF`) para ver solo lo limpio |
 
 - **No son objetos CAD "inteligentes"**: los textos no son `TEXT` editable
   (están calcados en `CALCADO_REFERENCIA`), no hay puertas, ventanas ni
@@ -92,12 +93,11 @@ subcarpeta **`Convertidos_DWG`**, creada automáticamente **dentro de esta
 misma carpeta del programa** (no junto al PDF original). El nombre de esa
 subcarpeta es fijo: el programa nunca pregunta cómo llamarla.
 
-> Si conviertes dos PDF distintos que se llaman igual (por ejemplo dos
-> archivos `planta1.pdf` de carpetas distintas), el segundo sobrescribirá
-> el resultado del primero dentro de `Convertidos_DWG`, ya que todos los
-> resultados comparten esa misma carpeta. Si necesitas conservarlos por
-> separado, renombra los PDF antes de convertirlos o mueve el resultado a
-> otro lugar entre una conversión y otra.
+> Cada conversión genera un archivo **nuevo con la fecha y hora en el nombre**
+> (por ejemplo `planta1_20261002_154715.dxf`). Así nunca se sobrescribe un
+> DXF que AutoCAD, OneDrive o el antivirus tengan abierto o bloqueado (si no,
+> AutoCAD avisa que el archivo "está en uso o es de solo lectura"). Borra a
+> mano las versiones viejas que ya no necesites.
 
 ### Opción 2: Sin arrastrar nada
 
@@ -176,7 +176,8 @@ planos2dwg/
 ├── setup.py                # Instalación opcional vía pip (pip install -e .)
 ├── src/
 │   ├── pdf_processor.py    # PDF -> imágenes (PyMuPDF)
-│   ├── muros.py            # Muros (pares de caras paralelas) y ejes (OpenCV LSD)
+│   ├── muros.py            # Muros (pares de caras paralelas), remates y ejes (OpenCV LSD)
+│   ├── arcos.py            # Arcos y círculos (RANSAC sobre trocitos de línea)
 │   ├── deskew.py           # Enderezado de escaneos inclinados
 │   ├── vectorizer.py       # Imagen -> calcado fiel de la tinta (OpenCV)
 │   ├── line_detector.py    # Modo alterno: imagen -> líneas rectas

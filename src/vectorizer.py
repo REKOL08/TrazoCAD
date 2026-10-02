@@ -11,6 +11,7 @@ dibujante puede usar como base para redibujar o limpiar.
 from __future__ import annotations
 
 import logging
+import math
 
 import cv2
 import numpy as np
@@ -21,7 +22,11 @@ Polyline = list[tuple[float, float]]
 
 _REFERENCE_DPI = 300
 _BACKGROUND_KERNEL_AT_REF_DPI = 51
-_SIMPLIFY_EPSILON_PX_AT_REF_DPI = 0.7
+_SIMPLIFY_EPSILON_PX_AT_REF_DPI = 1.1
+_SMOOTH_SIGMA_PX_AT_REF_DPI = 1.3
+_SNAP_MIN_SEGMENT_MM = 3.0
+_SMALL_COMPONENT_MM = 5.0
+_SNAP_ANGLE_DEG = 1.5
 _MIN_SPECK_AREA_PX_AT_REF_DPI = 8
 _MIN_SPECK_POINTS_AT_REF_DPI = 12
 
@@ -51,22 +56,58 @@ def binarize_ink(image: np.ndarray, dpi: int) -> np.ndarray:
 
 def trace_ink(image: np.ndarray, dpi: int) -> list[Polyline]:
     """Calca la tinta de `image` como polilíneas cerradas en píxeles."""
-    ink = binarize_ink(image, dpi)
+    sharp = binarize_ink(image, dpi)
+    scale = dpi / _REFERENCE_DPI
+
+    # Las líneas grandes se suavizan (quita la escalera de píxeles que se ve como
+    # temblor); los componentes pequeños (letras, símbolos) se dejan con todo su
+    # detalle porque el suavizado los empasta y dejan de leerse.
+    smooth_sigma = _SMOOTH_SIGMA_PX_AT_REF_DPI * scale
+    smooth = (cv2.GaussianBlur(sharp, (0, 0), smooth_sigma) > 127).astype(np.uint8) * 255
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(sharp, connectivity=8)
+    small_limit = _SMALL_COMPONENT_MM * dpi / 25.4
+    is_small = np.zeros(count, dtype=bool)
+    is_small[1:] = np.maximum(stats[1:, cv2.CC_STAT_WIDTH], stats[1:, cv2.CC_STAT_HEIGHT]) <= small_limit
+    small_mask = is_small[labels].astype(np.uint8) * 255
+    near_small = cv2.dilate(small_mask, np.ones((5, 5), np.uint8))
+    ink = np.where(small_mask > 0, sharp, np.where(near_small > 0, 0, smooth)).astype(np.uint8)
     contours, _ = cv2.findContours(ink, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
 
-    scale = dpi / _REFERENCE_DPI
     min_area = _MIN_SPECK_AREA_PX_AT_REF_DPI * scale * scale
     min_points = _MIN_SPECK_POINTS_AT_REF_DPI * scale
     epsilon = _SIMPLIFY_EPSILON_PX_AT_REF_DPI * scale
+    fine_epsilon = 0.6 * scale
 
     polylines: list[Polyline] = []
     for contour in contours:
         if cv2.contourArea(contour) < min_area and len(contour) < min_points:
             continue
-        simplified = cv2.approxPolyDP(contour, epsilon, True)
+        _x, _y, box_w, box_h = cv2.boundingRect(contour)
+        small = max(box_w, box_h) <= small_limit
+        simplified = cv2.approxPolyDP(contour, fine_epsilon if small else epsilon, True)
         if len(simplified) < 3:
             continue
-        polylines.append([(float(x), float(y)) for x, y in simplified[:, 0, :]])
+        points = [(float(x), float(y)) for x, y in simplified[:, 0, :]]
+        if not small:
+            points = _snap_orthogonal(points, _SNAP_MIN_SEGMENT_MM * dpi / 25.4)
+        polylines.append(points)
 
     logger.info("Calcado de tinta: %d contornos -> %d polilíneas.", len(contours), len(polylines))
     return polylines
+
+
+def _snap_orthogonal(points: Polyline, min_length_px: float) -> Polyline:
+    """Endereza a H/V exactos los tramos largos casi horizontales o verticales."""
+    pts = [list(p) for p in points]
+    tolerance = math.tan(math.radians(_SNAP_ANGLE_DEG))
+    for i in range(len(pts)):
+        j = (i + 1) % len(pts)
+        (x1, y1), (x2, y2) = pts[i], pts[j]
+        dx, dy = x2 - x1, y2 - y1
+        if math.hypot(dx, dy) < min_length_px:
+            continue
+        if abs(dy) <= tolerance * abs(dx):
+            pts[i][1] = pts[j][1] = (y1 + y2) / 2
+        elif abs(dx) <= tolerance * abs(dy):
+            pts[i][0] = pts[j][0] = (x1 + x2) / 2
+    return [(p[0], p[1]) for p in pts]

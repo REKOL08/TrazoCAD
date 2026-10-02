@@ -19,6 +19,7 @@ import math
 import cv2
 import numpy as np
 
+from .arcos import Arc, detect_arcs
 from .line_detector import Segment, merge_collinear_segments
 
 logger = logging.getLogger("planos2dwg")
@@ -33,7 +34,8 @@ _STROKE_EDGE_MM = 0.55
 _PAIR_ANGLE_DEG = 2.5
 _PAIR_MIN_OVERLAP = 0.6
 _SNAP_ANGLE_DEG = 1.5
-_CORNER_REACH_MM = 2.5
+_CORNER_REACH_MM = 4.0
+_CAP_ALIGN_MM = 0.5
 
 _AXIS_MIN_PIECE_MM = 3.0
 _AXIS_GAP_MM = 14.0
@@ -61,9 +63,14 @@ def _lsd_segments(image: np.ndarray, dpi: int) -> np.ndarray:
 
 def _paired_indices(segments: np.ndarray, px_per_mm: float) -> set[int]:
     """Índices de los segmentos que tienen un paralelo cercano (cara de muro)."""
+    return {k for pair in _face_pairs(segments, px_per_mm) for k in pair}
+
+
+def _face_pairs(segments: np.ndarray, px_per_mm: float) -> list[tuple[int, int]]:
+    """Pares (i, j) de segmentos paralelos a distancia de muro y con solape."""
     count = len(segments)
     if count < 2:
-        return set()
+        return []
 
     angle = np.arctan2(segments[:, 3] - segments[:, 1], segments[:, 2] - segments[:, 0]) % math.pi
     ux, uy = np.cos(angle), np.sin(angle)
@@ -79,7 +86,7 @@ def _paired_indices(segments: np.ndarray, px_per_mm: float) -> set[int]:
     max_gap = _WALL_THICKNESS_MM[1] * px_per_mm
     angle_tol = math.radians(_PAIR_ANGLE_DEG)
 
-    paired: set[int] = set()
+    pairs: list[tuple[int, int]] = []
     for i in range(count - 1):
         rest = slice(i + 1, count)
         delta = np.abs(angle[i] - angle[rest])
@@ -101,9 +108,95 @@ def _paired_indices(segments: np.ndarray, px_per_mm: float) -> set[int]:
             & (overlap >= 0.8 * _WALL_MIN_LENGTH_MM * px_per_mm)
         )
         for offset in np.nonzero(match)[0]:
-            paired.add(i)
-            paired.add(i + 1 + int(offset))
-    return paired
+            pairs.append((i, i + 1 + int(offset)))
+    return pairs
+
+
+def _merge_stroke_edges(segments: np.ndarray, px_per_mm: float) -> list[Segment]:
+    """Funde los dos bordes de cada trazo grueso en una línea central.
+
+    LSD devuelve cada segmento orientado con el lado oscuro siempre del mismo
+    lado, así que los dos bordes de un trazo "se miran" (cada uno tiene al otro
+    en su lado oscuro), mientras que los bordes enfrentados de dos trazos
+    vecinos (el hueco entre las dos caras de un muro) se dan la espalda. Con
+    eso se funde cada trazo sin mezclar nunca las dos caras de un muro, que es
+    lo que pasaba al fusionar por distancia.
+    """
+    count = len(segments)
+    if count == 0:
+        return []
+
+    dx = segments[:, 2] - segments[:, 0]
+    dy = segments[:, 3] - segments[:, 1]
+    length = np.hypot(dx, dy)
+    ux, uy = dx / length, dy / length
+    dark_x, dark_y = -uy, ux  # lado oscuro de cada segmento
+    mid_x = (segments[:, 0] + segments[:, 2]) / 2
+    mid_y = (segments[:, 1] + segments[:, 3]) / 2
+
+    max_width = _STROKE_EDGE_MM * px_per_mm * 1.25
+    angle_tol = math.radians(3.0)
+    consumed = np.zeros(count, dtype=bool)
+    result: list[Segment] = []
+
+    for i in range(count):
+        if consumed[i]:
+            continue
+        rest = np.arange(i + 1, count)
+        rest = rest[~consumed[rest]]
+        if len(rest) == 0:
+            continue
+
+        # a lo largo de la dirección de i
+        cross = np.abs(ux[i] * uy[rest] - uy[i] * ux[rest])
+        sep_x, sep_y = mid_x[rest] - mid_x[i], mid_y[rest] - mid_y[i]
+        toward_j = sep_x * dark_x[i] + sep_y * dark_y[i]  # j en el lado oscuro de i
+        toward_i = -(sep_x * dark_x[rest] + sep_y * dark_y[rest])  # i en el lado oscuro de j
+        a = (segments[rest, 0] - segments[i, 0]) * ux[i] + (segments[rest, 1] - segments[i, 1]) * uy[i]
+        b = (segments[rest, 2] - segments[i, 0]) * ux[i] + (segments[rest, 3] - segments[i, 1]) * uy[i]
+        low_j, high_j = np.minimum(a, b), np.maximum(a, b)
+        overlap = np.minimum(length[i], high_j) - np.maximum(0.0, low_j)
+        shortest = np.minimum(length[i], high_j - low_j)
+
+        ok = (
+            (cross <= math.sin(angle_tol))
+            & (toward_j > 0.8)
+            & (toward_j <= max_width)
+            & (toward_i > 0.8)
+            & (overlap >= 0.5 * shortest)
+        )
+        candidates = np.nonzero(ok)[0]
+        if len(candidates) == 0:
+            continue
+        best = rest[candidates[np.argmax(overlap[candidates])]]
+        consumed[i] = consumed[best] = True
+
+        # línea central: promedio de los dos bordes, tramo = unión de ambos
+        direction = (ux[i], uy[i])
+        start_i = (segments[i, 0], segments[i, 1])
+        s_values = [
+            0.0,
+            length[i],
+            (segments[best, 0] - start_i[0]) * direction[0] + (segments[best, 1] - start_i[1]) * direction[1],
+            (segments[best, 2] - start_i[0]) * direction[0] + (segments[best, 3] - start_i[1]) * direction[1],
+        ]
+        lo, hi = min(s_values), max(s_values)
+        shift_x = (mid_x[best] - mid_x[i]) / 2
+        shift_y = (mid_y[best] - mid_y[i]) / 2
+        # quitar la componente a lo largo de la línea del desplazamiento
+        along = shift_x * direction[0] + shift_y * direction[1]
+        shift_x, shift_y = shift_x - along * direction[0], shift_y - along * direction[1]
+        result.append(
+            (
+                (start_i[0] + lo * direction[0] + shift_x, start_i[1] + lo * direction[1] + shift_y),
+                (start_i[0] + hi * direction[0] + shift_x, start_i[1] + hi * direction[1] + shift_y),
+            )
+        )
+
+    for i in range(count):
+        if not consumed[i]:
+            result.append(((float(segments[i, 0]), float(segments[i, 1])), (float(segments[i, 2]), float(segments[i, 3]))))
+    return result
 
 
 def _snap_axis_aligned(segments: list[Segment]) -> list[Segment]:
@@ -170,12 +263,54 @@ def _extend_to_corners(segments: list[Segment], reach_px: float) -> list[Segment
     return [((p[0][0], p[0][1]), (p[1][0], p[1][1])) for p in result]
 
 
+def _point_touches(point: tuple[float, float], segments: list[Segment], skip: set[int], tol: float) -> bool:
+    for k, (a, b) in enumerate(segments):
+        if k in skip:
+            continue
+        abx, aby = b[0] - a[0], b[1] - a[1]
+        denom = abx * abx + aby * aby
+        if denom == 0:
+            continue
+        t = max(0.0, min(1.0, ((point[0] - a[0]) * abx + (point[1] - a[1]) * aby) / denom))
+        if math.hypot(point[0] - (a[0] + t * abx), point[1] - (a[1] + t * aby)) <= tol:
+            return True
+    return False
+
+
+def _end_caps(walls: list[Segment], px_per_mm: float) -> list[Segment]:
+    """Cierra con una línea los extremos libres de cada muro (jambas, cabezas)."""
+    if len(walls) < 2:
+        return []
+    array = np.array([[a[0], a[1], b[0], b[1]] for a, b in walls], dtype=np.float64)
+    align_tol = _CAP_ALIGN_MM * px_per_mm
+    touch_tol = 2.5 * px_per_mm / 11.8
+    caps: dict[tuple[int, int, int, int], Segment] = {}
+
+    for i, j in _face_pairs(array, px_per_mm):
+        a, b = walls[i], walls[j]
+        length = math.dist(a[0], a[1])
+        if length == 0:
+            continue
+        ux, uy = (a[1][0] - a[0][0]) / length, (a[1][1] - a[0][1]) / length
+        along_a = [(p[0] * ux + p[1] * uy) for p in a]
+        along_b = [(p[0] * ux + p[1] * uy) for p in b]
+        for end_a, end_b in ((int(np.argmin(along_a)), int(np.argmin(along_b))), (int(np.argmax(along_a)), int(np.argmax(along_b)))):
+            if abs(along_a[end_a] - along_b[end_b]) > align_tol:
+                continue
+            tip_a, tip_b = a[end_a], b[end_b]
+            if _point_touches(tip_a, walls, {i}, touch_tol) or _point_touches(tip_b, walls, {j}, touch_tol):
+                continue
+            key = tuple(int(round(v / 3)) for v in (*sorted([tip_a, tip_b])[0], *sorted([tip_a, tip_b])[1]))
+            caps[key] = (tip_a, tip_b)
+    return list(caps.values())
+
+
 def detect_walls_and_axes(
     image: np.ndarray,
     dpi: int,
     ignore_bottom_fraction: float = 0.0,
-) -> tuple[list[Segment], list[Segment]]:
-    """Devuelve (caras de muro, ejes) como segmentos en píxeles.
+) -> tuple[list[Segment], list[Segment], list[Arc]]:
+    """Devuelve (caras de muro, ejes, arcos); segmentos en píxeles.
 
     `ignore_bottom_fraction` descarta la franja inferior de la imagen (por
     ejemplo el rótulo del plano) para que no se confunda con muros.
@@ -183,24 +318,27 @@ def detect_walls_and_axes(
     px_per_mm = dpi / _MM_PER_INCH
     segments = _lsd_segments(image, dpi)
     if len(segments) == 0:
-        return [], []
+        return [], [], []
 
     if ignore_bottom_fraction > 0:
         limit = image.shape[0] * (1 - ignore_bottom_fraction)
         centres_y = (segments[:, 1] + segments[:, 3]) / 2
         segments = segments[centres_y < limit]
 
+    # las curvas se detectan primero: sus trocitos no deben acabar como rectas
+    arcs, arc_used = detect_arcs(segments, dpi)
+    segments = segments[~arc_used]
+
     lengths = np.hypot(segments[:, 2] - segments[:, 0], segments[:, 3] - segments[:, 1])
     segments = segments[lengths >= _AXIS_MIN_PIECE_MM * px_per_mm]
 
-    # LSD devuelve los dos bordes de cada trazo grueso: se fusionan en una
-    # sola línea central antes de buscar pares de caras de muro.
-    raw: list[Segment] = [
-        ((float(s[0]), float(s[1])), (float(s[2]), float(s[3]))) for s in segments
-    ]
+    # LSD devuelve los dos bordes de cada trazo grueso: se funden en una sola
+    # línea central antes de buscar pares de caras de muro.
     strokes = merge_collinear_segments(
-        raw, dpi=dpi, offset_tolerance_px=_STROKE_EDGE_MM * px_per_mm
+        _merge_stroke_edges(segments, px_per_mm), dpi=dpi
     )
+    if not strokes:
+        return [], [], arcs
     stroke_array = np.array([[a[0], a[1], b[0], b[1]] for a, b in strokes], dtype=np.float64)
     stroke_lengths = np.hypot(
         stroke_array[:, 2] - stroke_array[:, 0], stroke_array[:, 3] - stroke_array[:, 1]
@@ -214,12 +352,19 @@ def detect_walls_and_axes(
     walls = merge_collinear_segments(wall_raw, dpi=dpi)
     walls = _snap_axis_aligned(walls)
     walls = _extend_to_corners(walls, _CORNER_REACH_MM * px_per_mm)
+    walls = walls + _end_caps(walls, px_per_mm)
 
     axis_pieces = [stroke for k, stroke in enumerate(strokes) if k not in paired_ids]
     axes = _axes_from_pieces(axis_pieces, dpi, px_per_mm)
 
-    logger.info("Muros: %d caras (de %d segmentos). Ejes: %d.", len(walls), len(wall_raw), len(axes))
-    return walls, axes
+    logger.info(
+        "Muros: %d caras (de %d segmentos). Ejes: %d. Arcos: %d.",
+        len(walls),
+        len(wall_raw),
+        len(axes),
+        len(arcs),
+    )
+    return walls, axes, arcs
 
 
 def _axes_from_pieces(pieces: list[Segment], dpi: int, px_per_mm: float) -> list[Segment]:
