@@ -112,3 +112,22 @@ def test_build_dxf_escribe_textos_en_sus_capas(tmp_path: Path) -> None:
     assert entidades["COCINA"].dxf.layer == LAYER_TEXT
     assert entidades["PISO XX"].dxf.layer == LAYER_TEXT_REVIEW
     assert entidades["COCINA"].dxf.height > 0
+
+
+def test_build_dxf_escribe_puertas_y_ventanas_en_sus_capas(tmp_path: Path) -> None:
+    from src.arcos import Arc
+    from src.dxf_writer import LAYER_DOORS, LAYER_WINDOWS
+    from src.puertas import Door
+    from src.ventanas import Window
+
+    puerta = Door(arc=Arc(300.0, 400.0, 100.0, 0.0, 90.0), leaf=((300.0, 400.0), (400.0, 400.0)))
+    ventana = Window(lines=[((0.0, 0.0), (100.0, 0.0)), ((0.0, 7.0), (100.0, 7.0))])
+    salida = tmp_path / "pv.dxf"
+
+    build_dxf([], dpi=300, image_height_px=1000, output_path=salida, doors=[puerta], windows=[ventana])
+
+    modelspace = ezdxf.readfile(salida).modelspace()
+    arcos = list(modelspace.query("ARC"))
+    lineas = {e.dxf.layer for e in modelspace.query("LINE")}
+    assert [a.dxf.layer for a in arcos] == [LAYER_DOORS]
+    assert lineas == {LAYER_DOORS, LAYER_WINDOWS}

@@ -13,14 +13,16 @@ Cada conversión entrega **dos archivos**: `..._limpio.dxf` (solo lo reconstruid
 | Capa | Qué contiene | Calidad |
 |---|---|---|
 | `MUROS` | Caras de muros como líneas **rectas, paralelas y enderezadas** (horizontal/vertical exactas), con esquinas prolongadas hasta cruzarse y los extremos libres cerrados con un remate | Limpia, pero **parcial**: faltan tramos. Se descartan las filas de cotas (otra separación entre líneas) y los contornos cortos aislados como muebles |
+| `PUERTAS` | El arco de giro de cada puerta y su hoja (si está dibujada), en amarillo | Detecta las puertas de arco fino con bisagra sobre un muro; en un plano real encontró 4 de ~10, así que **faltan puertas**. La hoja solo aparece si se ve en el escaneo |
+| `VENTANAS` | Huecos en un muro con líneas finas dentro: las tres líneas (cara, centro, cara) y sus jambas, en celeste | **Muy incompleta**: si el plano dibuja la ventana sobre las líneas de las caras del muro, en el escaneo el muro parece continuo y no se ve el hueco; en el plano de prueba solo se encontró 1 |
 | `ARCOS` | Arcos y círculos reales (`ARC`/`CIRCLE`): muros curvos, puertas batientes, escaleras circulares | Buena en curvas grandes; puede haber algún arco falso o faltar uno |
 | `EJES` | Ejes de trazo y punto (tipo de línea `CENTER`): la cuadrícula de letras y números y algunos radiales | Buena en la cuadrícula; puede faltar algún eje radial y no toma como eje las líneas de corte continuas |
 | `TEXTOS` | Los nombres de espacios y las cifras leídos con OCR, como **texto de AutoCAD editable** (se pueden corregir con doble clic), en azul | Buena en nombres (SALON SOCIAL, COCINA, ACCESO...); se corrigen confusiones típicas con un vocabulario de planos (BARO -> BAÑO) |
 | `TEXTOS_REVISAR` | Lecturas dudosas (poca confianza, no reconocidas en el vocabulario) en naranja | Hay que revisarlas a mano; su dibujo original sigue en `CALCADO_REFERENCIA` para comparar |
 | `CALCADO_REFERENCIA` | Calco fiel de toda la tinta del escaneo (textos, símbolos, cotas, curvas) como polilíneas, con las líneas largas suavizadas y enderezadas | Se ve como el PDF; es una **referencia para calcar encima**, apágala (`LAYER OFF`) para ver solo lo limpio |
 
-- **No son objetos CAD "inteligentes"**: no hay puertas, ventanas, cotas ni
-  muebles como bloques, y los muros no tienen relleno ni espesor como objeto.
+- **No son objetos CAD "inteligentes"**: no hay cotas ni muebles como bloques,
+  y las puertas y ventanas son solo geometría (no bloques con sus atributos), y los muros no tienen relleno ni espesor como objeto.
   Los textos sí son `TEXT` editable si instalaste el OCR (ver abajo); sin él
   quedan solo como calco.
   La salida es una **base para que un dibujante redibuje**, no un plano
@@ -199,6 +201,8 @@ planos2dwg/
 │   ├── muros.py            # Muros (pares de caras paralelas), remates y ejes (OpenCV LSD)
 │   ├── arcos.py            # Arcos y círculos (RANSAC sobre trocitos de línea)
 │   ├── texto.py            # Textos con OCR local (RapidOCR), tiles y vocabulario de planos
+│   ├── puertas.py          # Puertas: arco de giro de la hoja (Hough + aislamiento + bisagra en muro)
+│   ├── ventanas.py         # Ventanas: huecos alineados en las dos caras de un muro con líneas dentro
 │   ├── deskew.py           # Enderezado de escaneos inclinados
 │   ├── vectorizer.py       # Imagen -> calcado fiel de la tinta (OpenCV)
 │   ├── line_detector.py    # Modo alterno: imagen -> líneas rectas

@@ -421,13 +421,13 @@ def _drop_small_clusters(walls: list[Segment], px_per_mm: float) -> list[Segment
     return kept
 
 
-def detect_walls_and_axes(
+def detect_plan(
     image: np.ndarray,
     dpi: int,
     ignore_bottom_fraction: float = 0.0,
     wall_thickness_mm: float | None = None,
-) -> tuple[list[Segment], list[Segment], list[Arc]]:
-    """Devuelve (caras de muro, ejes, arcos); segmentos en píxeles.
+) -> tuple[list[Segment], list[Segment], list[Arc], float | None]:
+    """Devuelve (caras de muro, ejes, arcos, espesor de muro en px); segmentos en píxeles.
 
     `ignore_bottom_fraction` descarta la franja inferior de la imagen (por
     ejemplo el rótulo del plano) para que no se confunda con muros.
@@ -438,7 +438,7 @@ def detect_walls_and_axes(
     px_per_mm = dpi / _MM_PER_INCH
     segments = _lsd_segments(image, dpi)
     if len(segments) == 0:
-        return [], [], []
+        return [], [], [], None
 
     if ignore_bottom_fraction > 0:
         limit = image.shape[0] * (1 - ignore_bottom_fraction)
@@ -462,7 +462,7 @@ def detect_walls_and_axes(
     if not strokes:
         # sin trazos largos solo pueden quedar ejes de rayas cortas
         tiny_strokes, _ = _merge_stroke_edges(tiny, px_per_mm)
-        return [], _axes_from_pieces(tiny_strokes, dpi, px_per_mm), arcs
+        return [], _axes_from_pieces(tiny_strokes, dpi, px_per_mm), arcs, None
     stroke_array = np.array([[a[0], a[1], b[0], b[1]] for a, b in strokes], dtype=np.float64)
     stroke_lengths = np.hypot(
         stroke_array[:, 2] - stroke_array[:, 0], stroke_array[:, 3] - stroke_array[:, 1]
@@ -523,7 +523,7 @@ def detect_walls_and_axes(
         len(axes),
         len(arcs),
     )
-    return walls, axes, arcs
+    return walls, axes, arcs, thickness
 
 
 def _axes_from_pieces(pieces: list[Segment], dpi: int, px_per_mm: float) -> list[Segment]:
@@ -568,3 +568,16 @@ def _union_intervals(intervals: list[tuple[float, float]], gap: float) -> list[t
         else:
             merged.append((start, end))
     return merged
+
+
+def detect_walls_and_axes(
+    image: np.ndarray,
+    dpi: int,
+    ignore_bottom_fraction: float = 0.0,
+    wall_thickness_mm: float | None = None,
+) -> tuple[list[Segment], list[Segment], list[Arc]]:
+    """Devuelve (caras de muro, ejes, arcos); ver `detect_plan` para el espesor medido."""
+    walls, axes, arcs, _thickness = detect_plan(
+        image, dpi, ignore_bottom_fraction=ignore_bottom_fraction, wall_thickness_mm=wall_thickness_mm
+    )
+    return walls, axes, arcs

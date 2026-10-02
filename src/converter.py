@@ -15,7 +15,10 @@ from .dwg_converter import convert_dxf_to_dwg
 from .deskew import deskew
 from .dxf_writer import build_dxf
 from .line_detector import detect_lines, filter_short_segments, merge_collinear_segments
-from .muros import detect_walls_and_axes
+from .muros import detect_plan
+from .puertas import detect_doors
+from .ventanas import detect_windows
+from .vectorizer import binarize_ink
 from .pdf_processor import render_pdf_pages
 from .texto import TextItem, read_texts
 from .utils import ConversionError, validate_pdf
@@ -61,6 +64,26 @@ def _arc_segments(arcs: list, step_px: float = 15.0) -> list:
         ]
         segments.extend(zip(points, points[1:]))
     return segments
+
+
+def _door_segments(doors: list) -> list:
+    """Segmentos que representan las puertas (arco aproximado y hoja), para medir el calco."""
+    segments = _arc_segments([door.arc for door in doors])
+    segments.extend(door.leaf for door in doors if door.leaf is not None)
+    return segments
+
+
+def _without_door_arcs(arcs: list, doors: list, tol_px: float) -> list:
+    """Quita de ARCOS los arcos que en realidad son el giro de una puerta ya detectada."""
+    return [
+        arc
+        for arc in arcs
+        if not any(
+            math.hypot(arc.cx - door.arc.cx, arc.cy - door.arc.cy) < tol_px
+            and abs(arc.radius - door.arc.radius) < tol_px
+            for door in doors
+        )
+    ]
 
 
 def _without_explained(polylines: list, clean_segments: list, tol_px: float, share: float = 0.85) -> list:
@@ -154,6 +177,8 @@ def convert_pdf(
             axes: list = []
             arcs: list = []
             texts: list = []
+            doors: list = []
+            windows: list = []
             if mode == MODE_LINES:
                 segments = detect_lines(image)
                 segments = merge_collinear_segments(segments, dpi=page.dpi)
@@ -161,11 +186,16 @@ def convert_pdf(
                     segments, min_length_mm=min_length_mm, dpi=page.dpi
                 )
             else:
-                walls, axes, arcs = detect_walls_and_axes(
+                walls, axes, arcs, thickness = detect_plan(
                     image,
                     page.dpi,
                     ignore_bottom_fraction=ignore_bottom_fraction,
                     wall_thickness_mm=wall_thickness_mm,
+                )
+                doors = detect_doors(image, page.dpi, wall_thickness_px=thickness)
+                arcs = _without_door_arcs(arcs, doors, tol_px=1.5 * (thickness or page.dpi / 25.4))
+                windows = detect_windows(
+                    walls, binarize_ink(image, page.dpi), page.dpi, thickness or page.dpi / 25.4
                 )
                 if read_text:
                     texts = read_texts(image, ignore_bottom_fraction=ignore_bottom_fraction)
@@ -174,14 +204,15 @@ def convert_pdf(
                     before = len(polylines)
                     polylines = _without_explained(
                         polylines,
-                        list(walls) + list(axes) + _arc_segments(arcs),
+                        list(walls) + list(axes) + _arc_segments(arcs) + _door_segments(doors)
+                        + [line for window in windows for line in window.lines],
                         tol_px=0.45 * page.dpi / 25.4,
                     )
                     logger.info(
                         "Calco: %d contornos ya explicados por muros, ejes y arcos se quitan.",
                         before - len(polylines),
                     )
-            if not segments and not polylines and not walls and not axes and not arcs and not texts:
+            if not any((segments, polylines, walls, axes, arcs, texts, doors, windows)):
                 logger.warning(
                     "'%s' página %d: no se detectó geometría; se omite esta página.",
                     pdf_path.name,
@@ -212,6 +243,8 @@ def convert_pdf(
                     axes=axes,
                     arcs=arcs,
                     texts=texts,
+                    doors=doors,
+                    windows=windows,
                 )
                 outputs.append(dxf_path)
                 if generate_dwg:

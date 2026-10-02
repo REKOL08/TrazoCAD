@@ -17,7 +17,9 @@ from ezdxf.enums import TextEntityAlignment
 
 from .arcos import Arc
 from .line_detector import Segment
+from .puertas import Door
 from .texto import TextItem
+from .ventanas import Window
 from .vectorizer import Polyline
 
 logger = logging.getLogger("planos2dwg")
@@ -27,6 +29,8 @@ LAYER_TRACE = "CALCADO_REFERENCIA"
 LAYER_WALLS = "MUROS"
 LAYER_AXES = "EJES"
 LAYER_ARCS = "ARCOS"
+LAYER_DOORS = "PUERTAS"
+LAYER_WINDOWS = "VENTANAS"
 TEXT_STYLE = "PLANOS"
 LAYER_TEXT = "TEXTOS"
 LAYER_TEXT_REVIEW = "TEXTOS_REVISAR"
@@ -48,6 +52,8 @@ def build_dxf(
     axes: list[Segment] | None = None,
     arcs: list[Arc] | None = None,
     texts: list[TextItem] | None = None,
+    doors: list[Door] | None = None,
+    windows: list[Window] | None = None,
 ) -> Path:
     """Escribe `segments` y `polylines` (en píxeles) en un DXF nuevo.
 
@@ -61,6 +67,8 @@ def build_dxf(
     axes = axes or []
     arcs = arcs or []
     texts = texts or []
+    doors = doors or []
+    windows = windows or []
 
     document = ezdxf.new(dxfversion="R2010", setup=True, units=ezdxf.units.MM)
     document.header["$INSUNITS"] = ezdxf.units.MM
@@ -80,6 +88,10 @@ def build_dxf(
         layers.add(name=LAYER_TEXT, color=5)
     if LAYER_TEXT_REVIEW not in layers:
         layers.add(name=LAYER_TEXT_REVIEW, color=30)
+    if LAYER_WINDOWS not in layers:
+        layers.add(name=LAYER_WINDOWS, color=4, lineweight=18)
+    if LAYER_DOORS not in layers:
+        layers.add(name=LAYER_DOORS, color=2, lineweight=25)
     if LAYER_ARCS not in layers:
         layers.add(name=LAYER_ARCS, color=7, lineweight=25)
     if LAYER_AXES not in layers:
@@ -109,6 +121,22 @@ def build_dxf(
                 centre, radius, arc.start_deg, arc.end_deg, dxfattribs={"layer": LAYER_ARCS}
             )
 
+    for window in windows:
+        for (x1, y1), (x2, y2) in window.lines:
+            modelspace.add_line(to_mm(x1, y1), to_mm(x2, y2), dxfattribs={"layer": LAYER_WINDOWS})
+
+    for door in doors:
+        modelspace.add_arc(
+            to_mm(door.arc.cx, door.arc.cy),
+            _px_to_mm(door.arc.radius, dpi),
+            door.arc.start_deg,
+            door.arc.end_deg,
+            dxfattribs={"layer": LAYER_DOORS},
+        )
+        if door.leaf is not None:
+            (hx, hy), (tx, ty) = door.leaf
+            modelspace.add_line(to_mm(hx, hy), to_mm(tx, ty), dxfattribs={"layer": LAYER_DOORS})
+
     for item in texts:
         entity = modelspace.add_text(
             item.text,
@@ -133,12 +161,14 @@ def build_dxf(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     document.saveas(output_path)
     logger.info(
-        "DXF generado: %s (%d líneas, %d muros, %d ejes, %d arcos, %d textos, %d trazos de referencia)",
+        "DXF generado: %s (%d líneas, %d muros, %d ejes, %d arcos, %d puertas, %d ventanas, %d textos, %d trazos de referencia)",
         output_path,
         len(segments),
         len(walls),
         len(axes),
         len(arcs),
+        len(doors),
+        len(windows),
         len(texts),
         len(polylines),
     )
