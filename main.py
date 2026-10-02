@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""Punto de entrada: convierte planos PDF escaneados a DXF/DWG editable.
+
+Modos de uso:
+  1. Arrastrar uno o varios PDF (o una carpeta) sobre `convertir.bat`.
+  2. Ejecutar `python main.py plano1.pdf plano2.pdf` desde la consola.
+  3. Ejecutar `python main.py` sin argumentos: se abre un selector de
+     carpeta (o se pide la ruta por consola si no hay entorno gráfico).
+
+Los archivos de salida (.dxf y, si está disponible ODA File Converter,
+.dwg) se guardan en la misma carpeta que cada PDF de entrada.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# Evita caracteres corruptos (acentos, ñ) al imprimir en la consola de Windows,
+# que por defecto no siempre usa UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except (ValueError, OSError):
+            pass
+
+from src.converter import convert_pdf  # noqa: E402
+from src.utils import DEFAULT_DPI, MAX_DPI, MIN_DPI, find_pdfs, setup_logging  # noqa: E402
+
+
+def _ask_folder_interactively() -> Path | None:
+    """Abre un selector de carpeta gráfico; si no hay GUI, pregunta por consola."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        selected = filedialog.askdirectory(
+            title="Selecciona la carpeta con los planos PDF a convertir"
+        )
+        root.destroy()
+        return Path(selected) if selected else None
+    except Exception:
+        try:
+            entered = input(
+                "Arrastra la carpeta con los PDF aquí y presiona Enter "
+                "(o escribe la ruta manualmente): "
+            ).strip().strip('"')
+        except EOFError:
+            return None
+        return Path(entered) if entered else None
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Convierte planos PDF escaneados a DXF/DWG editable."
+    )
+    parser.add_argument(
+        "inputs",
+        nargs="*",
+        help="Archivos PDF y/o carpetas a convertir (arrastrados o escritos a mano).",
+    )
+    parser.add_argument(
+        "--dpi",
+        type=int,
+        default=DEFAULT_DPI,
+        help=f"Resolución de escaneo a usar, entre {MIN_DPI} y {MAX_DPI} (por defecto {DEFAULT_DPI}).",
+    )
+    parser.add_argument(
+        "--no-dwg",
+        action="store_true",
+        help="Generar solo .dxf, sin intentar convertir a .dwg real con ODA File Converter.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Mostrar información detallada de depuración.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv if argv is not None else sys.argv[1:])
+    logger = setup_logging(verbose=args.verbose)
+
+    if not args.dpi or not (MIN_DPI <= args.dpi <= MAX_DPI):
+        logger.error("El valor de --dpi debe estar entre %d y %d.", MIN_DPI, MAX_DPI)
+        return 2
+
+    raw_inputs = [Path(item) for item in args.inputs]
+    if not raw_inputs:
+        logger.info("No se recibieron archivos ni carpetas; se abre el selector.")
+        folder = _ask_folder_interactively()
+        if folder is None:
+            logger.error("No se seleccionó ninguna carpeta. Operación cancelada.")
+            return 1
+        raw_inputs = [folder]
+
+    pdfs = find_pdfs(raw_inputs)
+    if not pdfs:
+        logger.error("No se encontró ningún archivo .pdf en lo indicado: %s", raw_inputs)
+        return 1
+
+    logger.info("Se van a procesar %d archivo(s) PDF a %d DPI.", len(pdfs), args.dpi)
+
+    successes = 0
+    failures = 0
+    for pdf_path in pdfs:
+        logger.info("Procesando: %s", pdf_path)
+        result = convert_pdf(
+            pdf_path,
+            output_dir=pdf_path.parent,
+            dpi=args.dpi,
+            generate_dwg=not args.no_dwg,
+        )
+        if result.success:
+            successes += 1
+            for output in result.outputs:
+                logger.info("  -> generado: %s", output.name)
+        else:
+            failures += 1
+            logger.error("  -> FALLÓ '%s': %s", pdf_path.name, result.error)
+
+    logger.info("Listo: %d exitoso(s), %d con error, de %d total.", successes, failures, len(pdfs))
+    return 0 if failures == 0 else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

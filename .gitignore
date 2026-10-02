@@ -1,0 +1,32 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+
+# Logs y resultados de ejecución
+logs/
+*.log
+
+# Archivos de salida generados por el propio script (no versionar planos reales)
+*.dxf
+*.dwg
+
+# Entornos de pruebas / caché
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editor / SO
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
