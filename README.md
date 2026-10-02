@@ -15,11 +15,14 @@ El DXF que se genera tiene **capas**, para poder ver solo lo limpio o todo:
 | `MUROS` | Caras de muros como líneas **rectas, paralelas y enderezadas** (horizontal/vertical exactas), con esquinas prolongadas hasta cruzarse y los extremos libres cerrados con un remate | Limpia, pero **parcial**: faltan tramos. Se descartan las filas de cotas (otra separación entre líneas) y los contornos cortos aislados como muebles |
 | `ARCOS` | Arcos y círculos reales (`ARC`/`CIRCLE`): muros curvos, puertas batientes, escaleras circulares | Buena en curvas grandes; puede haber algún arco falso o faltar uno |
 | `EJES` | Ejes de trazo y punto (tipo de línea `CENTER`): la cuadrícula de letras y números y algunos radiales | Buena en la cuadrícula; puede faltar algún eje radial y no toma como eje las líneas de corte continuas |
+| `TEXTOS` | Los nombres de espacios y las cifras leídos con OCR, como **texto de AutoCAD editable** (se pueden corregir con doble clic), en azul | Buena en nombres (SALON SOCIAL, COCINA, ACCESO...); se corrigen confusiones típicas con un vocabulario de planos (BARO -> BAÑO) |
+| `TEXTOS_REVISAR` | Lecturas dudosas (poca confianza, no reconocidas en el vocabulario) en naranja | Hay que revisarlas a mano; su dibujo original sigue en `CALCADO_REFERENCIA` para comparar |
 | `CALCADO_REFERENCIA` | Calco fiel de toda la tinta del escaneo (textos, símbolos, cotas, curvas) como polilíneas, con las líneas largas suavizadas y enderezadas | Se ve como el PDF; es una **referencia para calcar encima**, apágala (`LAYER OFF`) para ver solo lo limpio |
 
-- **No son objetos CAD "inteligentes"**: los textos no son `TEXT` editable
-  (están calcados en `CALCADO_REFERENCIA`), no hay puertas, ventanas ni
-  símbolos como bloques, y los muros no tienen relleno ni espesor como objeto.
+- **No son objetos CAD "inteligentes"**: no hay puertas, ventanas, cotas ni
+  muebles como bloques, y los muros no tienen relleno ni espesor como objeto.
+  Los textos sí son `TEXT` editable si instalaste el OCR (ver abajo); sin él
+  quedan solo como calco.
   La salida es una **base para que un dibujante redibuje**, no un plano
   terminado.
 - Modo `lineas` (`--modo lineas`): solo líneas rectas sueltas, sin muros ni
@@ -81,6 +84,20 @@ El DXF que se genera tiene **capas**, para poder ver solo lo limpio o todo:
 
 3. Listo. Ya puedes convertir planos arrastrándolos sobre `convertir.bat`.
 
+## Lectura de textos (OCR, opcional)
+
+`instalar.bat` instala también el OCR local **RapidOCR** (modelos ONNX, corre
+en tu PC, sin internet ni programas aparte). Si prefieres instalarlo a mano:
+
+```bash
+pip install -r requirements-ocr.txt
+```
+
+Sin él todo funciona igual, pero los textos quedan solo como calco. Leer un
+plano tarda unos 30-40 segundos extra; usa `--sin-texto` para omitirlo.
+Los textos pequeños, borrosos o muy tramados se leen peor: por eso hay una
+capa `TEXTOS_REVISAR`.
+
 ## Cómo usar
 
 ### Opción 1: Arrastrar y soltar (recomendada)
@@ -113,6 +130,7 @@ python main.py "C:\Planos\Edificio A"          # convierte todos los PDF de la c
 python main.py planta1.pdf --dpi 400            # usar más resolución
 python main.py planta1.pdf --rotar 90           # el escaneo está de lado
 python main.py planta1.pdf --ignorar-inferior 0.17  # no confundir el rótulo con muros
+python main.py planta1.pdf --sin-texto          # no leer textos (más rápido, ~30 s menos)
 python main.py planta1.pdf --solo-limpio        # solo MUROS y EJES, sin el calcado de referencia
 python main.py planta1.pdf --grosor-muro 1.0    # espesor de muro en mm sobre el papel (si no, se mide solo)
 python main.py planta1.pdf --modo lineas        # solo líneas rectas (modo alterno)
@@ -179,6 +197,7 @@ planos2dwg/
 │   ├── pdf_processor.py    # PDF -> imágenes (PyMuPDF)
 │   ├── muros.py            # Muros (pares de caras paralelas), remates y ejes (OpenCV LSD)
 │   ├── arcos.py            # Arcos y círculos (RANSAC sobre trocitos de línea)
+│   ├── texto.py            # Textos con OCR local (RapidOCR), tiles y vocabulario de planos
 │   ├── deskew.py           # Enderezado de escaneos inclinados
 │   ├── vectorizer.py       # Imagen -> calcado fiel de la tinta (OpenCV)
 │   ├── line_detector.py    # Modo alterno: imagen -> líneas rectas

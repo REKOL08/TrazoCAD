@@ -17,6 +17,7 @@ setup(
         "numpy>=1.26,<3.0",
         "ezdxf>=1.3,<2.0",
     ],
+    extras_require={"ocr": ["rapidocr-onnxruntime>=1.2,<2.0"]},
     python_requires=">=3.10",
     entry_points={
         "console_scripts": [

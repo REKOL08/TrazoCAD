@@ -91,3 +91,24 @@ def test_las_capas_llevan_grosor_de_linea(tmp_path: Path) -> None:
     assert documento.layers.get(LAYER_WALLS).dxf.lineweight == 50
     assert documento.layers.get(LAYER_AXES).dxf.lineweight == 18
     assert documento.header["$LWDISPLAY"] == 1
+
+
+def test_build_dxf_escribe_textos_en_sus_capas(tmp_path: Path) -> None:
+    import numpy as np
+
+    from src.dxf_writer import LAYER_TEXT, LAYER_TEXT_REVIEW
+    from src.texto import TextItem
+
+    caja = np.array([[100.0, 100.0], [300.0, 100.0], [300.0, 140.0], [100.0, 140.0]])
+    textos = [
+        TextItem("COCINA", 0.9, caja, sure=True),
+        TextItem("PISO XX", 0.6, caja + 500, sure=False),
+    ]
+    salida = tmp_path / "textos.dxf"
+
+    build_dxf([], dpi=300, image_height_px=1000, output_path=salida, texts=textos)
+
+    entidades = {e.dxf.text: e for e in ezdxf.readfile(salida).modelspace().query("TEXT")}
+    assert entidades["COCINA"].dxf.layer == LAYER_TEXT
+    assert entidades["PISO XX"].dxf.layer == LAYER_TEXT_REVIEW
+    assert entidades["COCINA"].dxf.height > 0

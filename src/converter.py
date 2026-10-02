@@ -15,6 +15,7 @@ from .dxf_writer import build_dxf
 from .line_detector import detect_lines, filter_short_segments, merge_collinear_segments
 from .muros import detect_walls_and_axes
 from .pdf_processor import render_pdf_pages
+from .texto import TextItem, read_texts
 from .utils import ConversionError, validate_pdf
 from .vectorizer import trace_ink
 
@@ -24,6 +25,23 @@ DEFAULT_MIN_LENGTH_MM = 8.0
 MODE_TRACE = "fiel"
 MODE_LINES = "lineas"
 VALID_ROTATIONS = (0, 90, 180, 270)
+
+
+def _without_read_letters(polylines: list, texts: list[TextItem]) -> list:
+    """Quita del calco las letras que el OCR leyó con seguridad (ya son texto editable).
+
+    Las lecturas dudosas se dejan en el calco para poder comparar y corregir.
+    """
+    sure = [t for t in texts if t.sure]
+    if not sure:
+        return polylines
+    kept = []
+    for polyline in polylines:
+        cx = sum(p[0] for p in polyline) / len(polyline)
+        cy = sum(p[1] for p in polyline) / len(polyline)
+        if not any(t.contains(cx, cy) for t in sure):
+            kept.append(polyline)
+    return kept
 
 
 def rotate_image(image: np.ndarray, degrees_ccw: int) -> np.ndarray:
@@ -59,6 +77,7 @@ def convert_pdf(
     ignore_bottom_fraction: float = 0.0,
     clean_only: bool = False,
     wall_thickness_mm: float | None = None,
+    read_text: bool = True,
 ) -> ConversionResult:
     """Convierte un único PDF a uno o varios archivos DXF/DWG (uno por página).
 
@@ -79,6 +98,7 @@ def convert_pdf(
             walls: list = []
             axes: list = []
             arcs: list = []
+            texts: list = []
             if mode == MODE_LINES:
                 segments = detect_lines(image)
                 segments = merge_collinear_segments(segments, dpi=page.dpi)
@@ -92,9 +112,11 @@ def convert_pdf(
                     ignore_bottom_fraction=ignore_bottom_fraction,
                     wall_thickness_mm=wall_thickness_mm,
                 )
+                if read_text:
+                    texts = read_texts(image, ignore_bottom_fraction=ignore_bottom_fraction)
                 if not clean_only:
-                    polylines = trace_ink(image, dpi=page.dpi)
-            if not segments and not polylines and not walls and not axes and not arcs:
+                    polylines = _without_read_letters(trace_ink(image, dpi=page.dpi), texts)
+            if not segments and not polylines and not walls and not axes and not arcs and not texts:
                 logger.warning(
                     "'%s' página %d: no se detectó geometría; se omite esta página.",
                     pdf_path.name,
@@ -116,6 +138,7 @@ def convert_pdf(
                     walls=walls,
                     axes=axes,
                     arcs=arcs,
+                    texts=texts,
                 )
             except PermissionError:
                 # El DXF anterior suele estar abierto en AutoCAD y Windows no
@@ -135,6 +158,7 @@ def convert_pdf(
                     walls=walls,
                     axes=axes,
                     arcs=arcs,
+                    texts=texts,
                 )
             outputs.append(dxf_path)
 

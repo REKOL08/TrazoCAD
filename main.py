@@ -123,6 +123,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--sin-texto",
+        action="store_true",
+        help="No leer los textos con OCR (más rápido; los textos quedan solo como calco).",
+    )
+    parser.add_argument(
         "--solo-limpio",
         action="store_true",
         help="No incluir la capa CALCADO_REFERENCIA: solo muros y ejes reconstruidos.",
@@ -191,6 +196,7 @@ def main(argv: list[str] | None = None) -> int:
             ignore_bottom_fraction=args.ignorar_inferior,
             clean_only=args.solo_limpio,
             wall_thickness_mm=args.grosor_muro,
+            read_text=not args.sin_texto,
         )
         if result.success:
             successes += 1

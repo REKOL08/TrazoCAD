@@ -35,6 +35,14 @@ if errorlevel 1 (
 )
 
 echo.
+echo Instalando lectura de textos (OCR, opcional) ...
+".venv\Scripts\python.exe" -m pip install -r requirements-ocr.txt
+if errorlevel 1 (
+    echo [AVISO] No se pudo instalar el OCR. El programa funciona igual, pero los textos
+    echo quedaran solo como dibujo y no como texto editable.
+)
+
+echo.
 echo ============================================
 echo  Instalacion completa.
 echo  Ya puedes arrastrar tus PDF sobre convertir.bat

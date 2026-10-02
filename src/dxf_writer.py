@@ -16,6 +16,7 @@ import ezdxf
 
 from .arcos import Arc
 from .line_detector import Segment
+from .texto import TextItem
 from .vectorizer import Polyline
 
 logger = logging.getLogger("planos2dwg")
@@ -25,6 +26,9 @@ LAYER_TRACE = "CALCADO_REFERENCIA"
 LAYER_WALLS = "MUROS"
 LAYER_AXES = "EJES"
 LAYER_ARCS = "ARCOS"
+LAYER_TEXT = "TEXTOS"
+LAYER_TEXT_REVIEW = "TEXTOS_REVISAR"
+_TEXT_HEIGHT_FACTOR = 0.78
 MM_PER_INCH = 25.4
 
 
@@ -41,6 +45,7 @@ def build_dxf(
     walls: list[Segment] | None = None,
     axes: list[Segment] | None = None,
     arcs: list[Arc] | None = None,
+    texts: list[TextItem] | None = None,
 ) -> Path:
     """Escribe `segments` y `polylines` (en píxeles) en un DXF nuevo.
 
@@ -53,6 +58,7 @@ def build_dxf(
     walls = walls or []
     axes = axes or []
     arcs = arcs or []
+    texts = texts or []
 
     document = ezdxf.new(dxfversion="R2010", setup=True, units=ezdxf.units.MM)
     document.header["$INSUNITS"] = ezdxf.units.MM
@@ -65,6 +71,10 @@ def build_dxf(
         layers.add(name=LAYER_TRACE, color=8, lineweight=13)
     if LAYER_WALLS not in layers:
         layers.add(name=LAYER_WALLS, color=7, lineweight=50)
+    if LAYER_TEXT not in layers:
+        layers.add(name=LAYER_TEXT, color=5)
+    if LAYER_TEXT_REVIEW not in layers:
+        layers.add(name=LAYER_TEXT_REVIEW, color=30)
     if LAYER_ARCS not in layers:
         layers.add(name=LAYER_ARCS, color=7, lineweight=25)
     if LAYER_AXES not in layers:
@@ -94,6 +104,15 @@ def build_dxf(
                 centre, radius, arc.start_deg, arc.end_deg, dxfattribs={"layer": LAYER_ARCS}
             )
 
+    for item in texts:
+        entity = modelspace.add_text(
+            item.text,
+            height=_px_to_mm(item.height_px, dpi) * _TEXT_HEIGHT_FACTOR,
+            rotation=item.angle_deg,
+            dxfattribs={"layer": LAYER_TEXT if item.sure else LAYER_TEXT_REVIEW},
+        )
+        entity.set_placement(to_mm(*item.baseline_start))
+
     for polyline in polylines:
         modelspace.add_lwpolyline(
             [to_mm(x, y) for x, y in polyline],
@@ -104,12 +123,13 @@ def build_dxf(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     document.saveas(output_path)
     logger.info(
-        "DXF generado: %s (%d líneas, %d muros, %d ejes, %d arcos, %d trazos de referencia)",
+        "DXF generado: %s (%d líneas, %d muros, %d ejes, %d arcos, %d textos, %d trazos de referencia)",
         output_path,
         len(segments),
         len(walls),
         len(axes),
         len(arcs),
+        len(texts),
         len(polylines),
     )
     return output_path
