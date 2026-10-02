@@ -10,9 +10,9 @@ if exist ".venv\Scripts\python.exe" (
 )
 
 if "%~1"=="" (
-    "%PYTHON_EXE%" main.py --rotar 90
+    "%PYTHON_EXE%" main.py --rotar 90 --ignorar-inferior 0.17
 ) else (
-    "%PYTHON_EXE%" main.py %* --rotar 90
+    "%PYTHON_EXE%" main.py %* --rotar 90 --ignorar-inferior 0.17
 )
 
 echo.

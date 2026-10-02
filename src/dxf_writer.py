@@ -20,7 +20,9 @@ from .vectorizer import Polyline
 logger = logging.getLogger("planos2dwg")
 
 LAYER_LINES = "LINEAS_DETECTADAS"
-LAYER_TRACE = "TRAZO_ORIGINAL"
+LAYER_TRACE = "CALCADO_REFERENCIA"
+LAYER_WALLS = "MUROS"
+LAYER_AXES = "EJES"
 MM_PER_INCH = 25.4
 
 
@@ -34,6 +36,8 @@ def build_dxf(
     image_height_px: int,
     output_path: Path,
     polylines: list[Polyline] | None = None,
+    walls: list[Segment] | None = None,
+    axes: list[Segment] | None = None,
 ) -> Path:
     """Escribe `segments` y `polylines` (en píxeles) en un DXF nuevo.
 
@@ -43,15 +47,21 @@ def build_dxf(
     arriba. Las unidades del documento quedan en milímetros.
     """
     polylines = polylines or []
+    walls = walls or []
+    axes = axes or []
 
-    document = ezdxf.new(dxfversion="R2010", units=ezdxf.units.MM)
+    document = ezdxf.new(dxfversion="R2010", setup=True, units=ezdxf.units.MM)
     document.header["$INSUNITS"] = ezdxf.units.MM
 
     layers = document.layers
     if LAYER_LINES not in layers:
         layers.add(name=LAYER_LINES, color=7)
     if LAYER_TRACE not in layers:
-        layers.add(name=LAYER_TRACE, color=7)
+        layers.add(name=LAYER_TRACE, color=8)
+    if LAYER_WALLS not in layers:
+        layers.add(name=LAYER_WALLS, color=7)
+    if LAYER_AXES not in layers:
+        layers.add(name=LAYER_AXES, color=1, linetype="CENTER")
 
     modelspace = document.modelspace()
 
@@ -60,6 +70,12 @@ def build_dxf(
 
     for (x1, y1), (x2, y2) in segments:
         modelspace.add_line(to_mm(x1, y1), to_mm(x2, y2), dxfattribs={"layer": LAYER_LINES})
+
+    for (x1, y1), (x2, y2) in walls:
+        modelspace.add_line(to_mm(x1, y1), to_mm(x2, y2), dxfattribs={"layer": LAYER_WALLS})
+
+    for (x1, y1), (x2, y2) in axes:
+        modelspace.add_line(to_mm(x1, y1), to_mm(x2, y2), dxfattribs={"layer": LAYER_AXES})
 
     for polyline in polylines:
         modelspace.add_lwpolyline(
@@ -71,6 +87,11 @@ def build_dxf(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     document.saveas(output_path)
     logger.info(
-        "DXF generado: %s (%d líneas, %d polilíneas)", output_path, len(segments), len(polylines)
+        "DXF generado: %s (%d líneas, %d muros, %d ejes, %d trazos de referencia)",
+        output_path,
+        len(segments),
+        len(walls),
+        len(axes),
+        len(polylines),
     )
     return output_path

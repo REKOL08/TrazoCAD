@@ -105,6 +105,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Gira el plano en sentido antihorario (0, 90, 180 o 270) si el escaneo está de lado.",
     )
     parser.add_argument(
+        "--ignorar-inferior",
+        type=float,
+        default=0.0,
+        help=(
+            "Fracción de la altura (0 a 0.5) de la franja inferior que se ignora al buscar "
+            "muros y ejes, útil para no confundir el rótulo del plano (ej. 0.17)."
+        ),
+    )
+    parser.add_argument(
+        "--solo-limpio",
+        action="store_true",
+        help="No incluir la capa CALCADO_REFERENCIA: solo muros y ejes reconstruidos.",
+    )
+    parser.add_argument(
         "--min-length",
         type=float,
         default=DEFAULT_MIN_LENGTH_MM,
@@ -165,6 +179,8 @@ def main(argv: list[str] | None = None) -> int:
             min_length_mm=args.min_length_mm,
             mode=args.modo,
             rotation=args.rotar,
+            ignore_bottom_fraction=args.ignorar_inferior,
+            clean_only=args.solo_limpio,
         )
         if result.success:
             successes += 1

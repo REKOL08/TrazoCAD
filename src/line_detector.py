@@ -97,6 +97,8 @@ def merge_collinear_segments(
     segments: list[Segment],
     dpi: int,
     angle_tolerance_deg: float = _ANGLE_TOLERANCE_DEG,
+    gap_tolerance_px: float | None = None,
+    offset_tolerance_px: float | None = None,
 ) -> list[Segment]:
     """Fusiona segmentos casi colineales y cercanos en uno solo más largo.
 
@@ -113,11 +115,18 @@ def merge_collinear_segments(
         return []
 
     scale = dpi / _REFERENCE_DPI
-    offset_tolerance = _OFFSET_TOLERANCE_PX_AT_REF_DPI * scale
-    gap_tolerance = _GAP_TOLERANCE_PX_AT_REF_DPI * scale
+    offset_tolerance = (
+        _OFFSET_TOLERANCE_PX_AT_REF_DPI * scale
+        if offset_tolerance_px is None
+        else offset_tolerance_px
+    )
+    gap_tolerance = (
+        _GAP_TOLERANCE_PX_AT_REF_DPI * scale if gap_tolerance_px is None else gap_tolerance_px
+    )
     angle_tolerance = math.radians(angle_tolerance_deg)
 
     angles_offsets = [_angle_and_offset(segment) for segment in segments]
+    mids = [((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) for a, b in segments]
 
     # Agrupar primero por ángulo (redondeado) para no comparar cada segmento
     # contra todos los demás: en un plano real la mayoría de los segmentos
@@ -147,15 +156,26 @@ def merge_collinear_segments(
         for neighbor_bucket in (bucket_id - 1, bucket_id, bucket_id + 1):
             neighbor_indices.extend(buckets.get(neighbor_bucket % num_buckets, []))
 
-        for position, i in enumerate(indices):
-            angle_i, offset_i = angles_offsets[i]
+        for i in indices:
+            angle_i = angles_offsets[i][0]
+            normal_i = (-math.sin(angle_i), math.cos(angle_i))
             for j in neighbor_indices:
                 if j <= i:
                     continue
-                angle_j, offset_j = angles_offsets[j]
+                angle_j = angles_offsets[j][0]
                 delta_angle = abs(angle_i - angle_j)
                 delta_angle = min(delta_angle, math.pi - delta_angle)
-                if delta_angle <= angle_tolerance and abs(offset_i - offset_j) <= offset_tolerance:
+                if delta_angle > angle_tolerance:
+                    continue
+                # distancia perpendicular real entre ambos (comparar offsets con
+                # signo falla cuando el ángulo cae a uno u otro lado de 0°/180°)
+                normal_j = (-math.sin(angle_j), math.cos(angle_j))
+                dx, dy = mids[j][0] - mids[i][0], mids[j][1] - mids[i][1]
+                distance = max(
+                    abs(dx * normal_i[0] + dy * normal_i[1]),
+                    abs(dx * normal_j[0] + dy * normal_j[1]),
+                )
+                if distance <= offset_tolerance:
                     union(i, j)
 
     groups: dict[int, list[int]] = {}
@@ -167,12 +187,15 @@ def merge_collinear_segments(
         representative_angle = angles_offsets[indices[0]][0]
         direction = (math.cos(representative_angle), math.sin(representative_angle))
 
-        anchor_x, anchor_y = segments[indices[0]][0]
-        anchor_projection = anchor_x * direction[0] + anchor_y * direction[1]
-        anchor = (
-            anchor_x - anchor_projection * direction[0],
-            anchor_y - anchor_projection * direction[1],
-        )
+        # ancla = promedio de los pies perpendiculares de todos los miembros,
+        # así el resultado queda en el centro del grupo y no en un borde
+        feet_x, feet_y = [], []
+        for index in indices:
+            (sx, sy), _end = segments[index]
+            projection = sx * direction[0] + sy * direction[1]
+            feet_x.append(sx - projection * direction[0])
+            feet_y.append(sy - projection * direction[1])
+        anchor = (sum(feet_x) / len(feet_x), sum(feet_y) / len(feet_y))
 
         intervals: list[tuple[float, float]] = []
         for index in indices:

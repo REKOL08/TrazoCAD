@@ -8,21 +8,29 @@ programación pueda instalarla y usarla en pocos minutos, arrastrando archivos.
 
 ## ⚠️ Qué hace y qué NO hace esta herramienta (leer antes de usar)
 
-- **Modo `fiel` (por defecto):** separa la tinta del papel y **calca cada
-  trazo como vectores** (polilíneas en la capa `TRAZO_ORIGINAL`). En
-  AutoCAD el plano se ve igual que el PDF: ejes, textos, símbolos, curvas.
-- **Lo que NO es:** no son objetos CAD "inteligentes". Un muro no es un muro
-  editable, un texto no es un `TEXT` que se pueda corregir y cada trazo es el
-  *contorno* de la línea original (se ve como una línea gruesa, pero son dos
-  trazos muy juntos). Sirve para ver, medir y como **base para que un
-  dibujante redibuje o limpie**; no reemplaza el redibujado.
-- Modo `lineas` (`--modo lineas`): detecta solo líneas rectas. Es más
-  limpio pero muy incompleto (sin textos ni símbolos); en pruebas con planos
-  reales se ve como "rayas sueltas", por eso ya no es el modo por defecto.
+El DXF que se genera tiene **capas**, para poder ver solo lo limpio o todo:
+
+| Capa | Qué contiene | Calidad |
+|---|---|---|
+| `MUROS` | Caras de muros como líneas **rectas, paralelas y enderezadas** (horizontal/vertical exactas), con esquinas prolongadas hasta cruzarse | Limpia, pero **parcial**: solo muros rectos; faltan tramos y los arcos salen en trozos rectos |
+| `EJES` | Ejes largos de trazo y punto (tipo de línea `CENTER`) | Limpia, pero **incompleta**: detecta algunos, no todos |
+| `CALCADO_REFERENCIA` | Calco fiel de toda la tinta del escaneo (textos, símbolos, cotas, curvas) como polilíneas | Se ve como el PDF, pero con trazos quebrados; es una **referencia para calcar encima**, apágala (`LAYER OFF`) para ver solo lo limpio |
+
+- **No son objetos CAD "inteligentes"**: los textos no son `TEXT` editable
+  (están calcados en `CALCADO_REFERENCIA`), no hay puertas, ventanas ni
+  símbolos como bloques, y los muros no tienen relleno ni espesor como objeto.
+  La salida es una **base para que un dibujante redibuje**, no un plano
+  terminado.
+- Modo `lineas` (`--modo lineas`): solo líneas rectas sueltas, sin muros ni
+  textos. Más limpio pero muy incompleto; no se recomienda.
 - **Si el plano sale de lado, usa `--rotar 90`** o arrastra los PDF sobre
-  `convertir_girado_90.bat`. Sale girado tal cual venga el escaneo.
-- La fidelidad depende de la calidad del escaneo: textos muy pequeños o
-  borrosos salen como manchas. Escanea a 300-400 DPI en blanco y negro o gris.
+  `convertir_girado_90.bat`. El escaneo también se **endereza** solo si viene
+  ligeramente inclinado.
+- **Rótulo del plano:** el recuadro de datos del plano (cajetín) se confunde
+  con muros. Usa `--ignorar-inferior 0.17` para ignorar el 17 % inferior de la
+  hoja al buscar muros y ejes (`convertir_girado_90.bat` ya lo incluye).
+- La fidelidad depende de la calidad del escaneo. Escanea a 300-400 DPI en
+  blanco y negro o gris.
 - **No genera un archivo `.dwg` binario por sí sola.** Ninguna librería libre
   de Python puede escribir `.dwg` (es un formato propietario de Autodesk). Lo
   que el script genera de forma nativa es **DXF**, que AutoCAD abre
@@ -104,6 +112,8 @@ python main.py "C:\Planos\Edificio A\planta1.pdf"
 python main.py "C:\Planos\Edificio A"          # convierte todos los PDF de la carpeta
 python main.py planta1.pdf --dpi 400            # usar más resolución
 python main.py planta1.pdf --rotar 90           # el escaneo está de lado
+python main.py planta1.pdf --ignorar-inferior 0.17  # no confundir el rótulo con muros
+python main.py planta1.pdf --solo-limpio        # solo MUROS y EJES, sin el calcado de referencia
 python main.py planta1.pdf --modo lineas        # solo líneas rectas (modo alterno)
 python main.py planta1.pdf --no-dwg             # generar solo .dxf, sin intentar .dwg
 python main.py planta1.pdf --verbose            # ver más detalle en consola/log
@@ -166,6 +176,8 @@ planos2dwg/
 ├── setup.py                # Instalación opcional vía pip (pip install -e .)
 ├── src/
 │   ├── pdf_processor.py    # PDF -> imágenes (PyMuPDF)
+│   ├── muros.py            # Muros (pares de caras paralelas) y ejes (OpenCV LSD)
+│   ├── deskew.py           # Enderezado de escaneos inclinados
 │   ├── vectorizer.py       # Imagen -> calcado fiel de la tinta (OpenCV)
 │   ├── line_detector.py    # Modo alterno: imagen -> líneas rectas
 │   ├── dxf_writer.py       # Segmentos -> archivo DXF (ezdxf)
