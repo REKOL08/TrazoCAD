@@ -74,7 +74,9 @@ programación pueda instalarla y usarla en pocos minutos, arrastrando archivos.
 Arrastra uno o varios archivos PDF — o una carpeta completa con PDF dentro —
 sobre el ícono de **`convertir.bat`**. Se abrirá una consola mostrando el
 progreso y, al terminar, los archivos `.dxf` (y `.dwg` si corresponde)
-quedarán en la **misma carpeta** donde estaban los PDF originales.
+quedarán organizados dentro de una subcarpeta **`Convertidos_DWG`**, creada
+automáticamente junto a cada PDF original. El nombre de esa subcarpeta es
+fijo: el programa nunca pregunta cómo llamarla.
 
 ### Opción 2: Sin arrastrar nada
 
@@ -102,8 +104,9 @@ Antes:
 Después de ejecutar convertir.bat:
   Planos/
     planta-primer-piso.pdf
-    planta-primer-piso.dxf   <- siempre se genera
-    planta-primer-piso.dwg   <- solo si está instalado ODA File Converter
+    Convertidos_DWG/
+      planta-primer-piso.dxf   <- siempre se genera
+      planta-primer-piso.dwg   <- solo si está instalado ODA File Converter
 ```
 
 Un PDF de varias páginas genera un `.dxf`/`.dwg` por cada página, con el

@@ -8,7 +8,9 @@ Modos de uso:
      carpeta (o se pide la ruta por consola si no hay entorno gráfico).
 
 Los archivos de salida (.dxf y, si está disponible ODA File Converter,
-.dwg) se guardan en la misma carpeta que cada PDF de entrada.
+.dwg) se guardan automáticamente en una subcarpeta "Convertidos_DWG" dentro
+de la carpeta de cada PDF de entrada; el nombre de esa subcarpeta es fijo,
+así que nunca se pregunta nada al usuario.
 """
 
 from __future__ import annotations
@@ -28,8 +30,15 @@ for _stream in (sys.stdout, sys.stderr):
         except (ValueError, OSError):
             pass
 
-from src.converter import convert_pdf  # noqa: E402
-from src.utils import DEFAULT_DPI, MAX_DPI, MIN_DPI, find_pdfs, setup_logging  # noqa: E402
+from src.converter import DEFAULT_MIN_LENGTH_MM, convert_pdf  # noqa: E402
+from src.utils import (  # noqa: E402
+    DEFAULT_DPI,
+    MAX_DPI,
+    MIN_DPI,
+    OUTPUT_SUBFOLDER_NAME,
+    find_pdfs,
+    setup_logging,
+)
 
 
 def _ask_folder_interactively() -> Path | None:
@@ -73,6 +82,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=f"Resolución de escaneo a usar, entre {MIN_DPI} y {MAX_DPI} (por defecto {DEFAULT_DPI}).",
     )
     parser.add_argument(
+        "--min-length",
+        type=float,
+        default=DEFAULT_MIN_LENGTH_MM,
+        dest="min_length_mm",
+        help=(
+            "Longitud mínima en milímetros (sobre el plano final) para conservar un "
+            f"segmento detectado; descarta ruido de texto/cotas/achurado (por defecto {DEFAULT_MIN_LENGTH_MM})."
+        ),
+    )
+    parser.add_argument(
         "--no-dwg",
         action="store_true",
         help="Generar solo .dxf, sin intentar convertir a .dwg real con ODA File Converter.",
@@ -112,17 +131,19 @@ def main(argv: list[str] | None = None) -> int:
     successes = 0
     failures = 0
     for pdf_path in pdfs:
+        output_dir = pdf_path.parent / OUTPUT_SUBFOLDER_NAME
         logger.info("Procesando: %s", pdf_path)
         result = convert_pdf(
             pdf_path,
-            output_dir=pdf_path.parent,
+            output_dir=output_dir,
             dpi=args.dpi,
             generate_dwg=not args.no_dwg,
+            min_length_mm=args.min_length_mm,
         )
         if result.success:
             successes += 1
             for output in result.outputs:
-                logger.info("  -> generado: %s", output.name)
+                logger.info("  -> generado: %s/%s", OUTPUT_SUBFOLDER_NAME, output.name)
         else:
             failures += 1
             logger.error("  -> FALLÓ '%s': %s", pdf_path.name, result.error)

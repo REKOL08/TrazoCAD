@@ -8,11 +8,13 @@ from pathlib import Path
 
 from .dwg_converter import convert_dxf_to_dwg
 from .dxf_writer import build_dxf
-from .line_detector import detect_lines
+from .line_detector import detect_lines, filter_short_segments, merge_collinear_segments
 from .pdf_processor import render_pdf_pages
 from .utils import ConversionError, validate_pdf
 
 logger = logging.getLogger("planos2dwg")
+
+DEFAULT_MIN_LENGTH_MM = 8.0
 
 
 @dataclass
@@ -28,6 +30,7 @@ def convert_pdf(
     output_dir: Path,
     dpi: int,
     generate_dwg: bool = True,
+    min_length_mm: float = DEFAULT_MIN_LENGTH_MM,
 ) -> ConversionResult:
     """Convierte un único PDF a uno o varios archivos DXF/DWG (uno por página).
 
@@ -43,6 +46,8 @@ def convert_pdf(
         outputs: list[Path] = []
         for page in pages:
             segments = detect_lines(page.image)
+            segments = merge_collinear_segments(segments, dpi=page.dpi)
+            segments = filter_short_segments(segments, min_length_mm=min_length_mm, dpi=page.dpi)
             if not segments:
                 logger.warning(
                     "'%s' página %d: no se detectó geometría; se omite esta página.",

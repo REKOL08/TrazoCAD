@@ -20,6 +20,11 @@ MAX_DPI = 600
 # Tamaño máximo de PDF que procesamos sin advertir al usuario (en MB).
 MAX_PDF_SIZE_WARN_MB = 80
 
+# Nombre fijo de la subcarpeta de resultados, creada automáticamente junto a
+# cada PDF de entrada. Es fijo (no se pregunta al usuario) para que el
+# proceso de arrastrar-y-soltar no requiera ninguna interacción adicional.
+OUTPUT_SUBFOLDER_NAME = "Convertidos_DWG"
+
 
 class ConversionError(Exception):
     """Error controlado durante la conversión de un PDF a DWG/DXF."""

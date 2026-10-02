@@ -1,6 +1,6 @@
 import numpy as np
 
-from src.line_detector import detect_lines
+from src.line_detector import detect_lines, filter_short_segments, merge_collinear_segments
 
 
 def _imagen_con_lineas() -> np.ndarray:
@@ -37,3 +37,46 @@ def test_detect_lines_rechaza_imagen_a_color() -> None:
         assert False, "debía lanzar ValueError para una imagen a color"
     except ValueError:
         pass
+
+
+def test_merge_collinear_segments_fusiona_fragmentos_de_un_mismo_muro() -> None:
+    # Tres fragmentos del mismo eje horizontal (y=10), con pequeños huecos
+    # entre ellos, como los que deja un escaneo con cotas/texto encima.
+    fragmentos = [
+        ((0.0, 10.0), (50.0, 10.0)),
+        ((55.0, 10.0), (100.0, 10.0)),
+        ((104.0, 10.0), (200.0, 10.0)),
+    ]
+
+    fusionados = merge_collinear_segments(fragmentos, dpi=300)
+
+    assert len(fusionados) == 1
+    (x1, _), (x2, _) = fusionados[0]
+    assert min(x1, x2) == 0.0
+    assert max(x1, x2) == 200.0
+
+
+def test_merge_collinear_segments_no_fusiona_lineas_de_distinto_angulo() -> None:
+    horizontal = ((0.0, 0.0), (50.0, 0.0))
+    vertical = ((0.0, 0.0), (0.0, 50.0))
+
+    fusionados = merge_collinear_segments([horizontal, vertical], dpi=300)
+
+    assert len(fusionados) == 2
+
+
+def test_filter_short_segments_descarta_segmentos_cortos() -> None:
+    corto = ((0.0, 0.0), (5.0, 0.0))  # ~0.4mm a 300 dpi
+    largo = ((0.0, 0.0), (200.0, 0.0))  # ~17mm a 300 dpi
+
+    filtrados = filter_short_segments([corto, largo], min_length_mm=8.0, dpi=300)
+
+    assert filtrados == [largo]
+
+
+def test_filter_short_segments_con_cero_no_descarta_nada() -> None:
+    segmentos = [((0.0, 0.0), (1.0, 0.0))]
+
+    filtrados = filter_short_segments(segmentos, min_length_mm=0, dpi=300)
+
+    assert filtrados == segmentos
