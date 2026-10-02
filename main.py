@@ -8,9 +8,9 @@ Modos de uso:
      carpeta (o se pide la ruta por consola si no hay entorno gráfico).
 
 Los archivos de salida (.dxf y, si está disponible ODA File Converter,
-.dwg) se guardan automáticamente en una subcarpeta "Convertidos_DWG" dentro
-de la carpeta de cada PDF de entrada; el nombre de esa subcarpeta es fijo,
-así que nunca se pregunta nada al usuario.
+.dwg) se guardan automáticamente en la subcarpeta "Convertidos_DWG" dentro
+de esta misma carpeta del programa (no junto al PDF de entrada); el nombre
+de esa subcarpeta es fijo, así que nunca se pregunta nada al usuario.
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from src.utils import (  # noqa: E402
     MAX_DPI,
     MIN_DPI,
     OUTPUT_SUBFOLDER_NAME,
+    PROJECT_ROOT,
     find_pdfs,
     setup_logging,
 )
@@ -126,12 +127,13 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("No se encontró ningún archivo .pdf en lo indicado: %s", raw_inputs)
         return 1
 
+    output_dir = PROJECT_ROOT / OUTPUT_SUBFOLDER_NAME
     logger.info("Se van a procesar %d archivo(s) PDF a %d DPI.", len(pdfs), args.dpi)
+    logger.info("Los resultados se guardarán en: %s", output_dir)
 
     successes = 0
     failures = 0
     for pdf_path in pdfs:
-        output_dir = pdf_path.parent / OUTPUT_SUBFOLDER_NAME
         logger.info("Procesando: %s", pdf_path)
         result = convert_pdf(
             pdf_path,
@@ -143,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
         if result.success:
             successes += 1
             for output in result.outputs:
-                logger.info("  -> generado: %s/%s", OUTPUT_SUBFOLDER_NAME, output.name)
+                logger.info("  -> generado: %s", output)
         else:
             failures += 1
             logger.error("  -> FALLÓ '%s': %s", pdf_path.name, result.error)

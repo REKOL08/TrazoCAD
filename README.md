@@ -71,12 +71,20 @@ programación pueda instalarla y usarla en pocos minutos, arrastrando archivos.
 
 ### Opción 1: Arrastrar y soltar (recomendada)
 
-Arrastra uno o varios archivos PDF — o una carpeta completa con PDF dentro —
-sobre el ícono de **`convertir.bat`**. Se abrirá una consola mostrando el
-progreso y, al terminar, los archivos `.dxf` (y `.dwg` si corresponde)
-quedarán organizados dentro de una subcarpeta **`Convertidos_DWG`**, creada
-automáticamente junto a cada PDF original. El nombre de esa subcarpeta es
-fijo: el programa nunca pregunta cómo llamarla.
+Arrastra uno o varios archivos PDF — o una carpeta completa con PDF dentro,
+estén donde estén en tu PC — sobre el ícono de **`convertir.bat`**. Se
+abrirá una consola mostrando el progreso y, al terminar, los archivos
+`.dxf` (y `.dwg` si corresponde) quedarán organizados dentro de la
+subcarpeta **`Convertidos_DWG`**, creada automáticamente **dentro de esta
+misma carpeta del programa** (no junto al PDF original). El nombre de esa
+subcarpeta es fijo: el programa nunca pregunta cómo llamarla.
+
+> Si conviertes dos PDF distintos que se llaman igual (por ejemplo dos
+> archivos `planta1.pdf` de carpetas distintas), el segundo sobrescribirá
+> el resultado del primero dentro de `Convertidos_DWG`, ya que todos los
+> resultados comparten esa misma carpeta. Si necesitas conservarlos por
+> separado, renombra los PDF antes de convertirlos o mueve el resultado a
+> otro lugar entre una conversión y otra.
 
 ### Opción 2: Sin arrastrar nada
 
@@ -99,14 +107,23 @@ python main.py planta1.pdf --verbose            # ver más detalle en consola/lo
 ```
 Antes:
   Planos/
-    planta-primer-piso.pdf
+    planta-primer-piso.pdf           <- tu PDF, en cualquier carpeta
 
-Después de ejecutar convertir.bat:
+  planos2dwg/                        <- la carpeta de este programa
+    convertir.bat
+    main.py
+    ...
+
+Después de arrastrar planta-primer-piso.pdf sobre convertir.bat:
   Planos/
-    planta-primer-piso.pdf
-    Convertidos_DWG/
-      planta-primer-piso.dxf   <- siempre se genera
-      planta-primer-piso.dwg   <- solo si está instalado ODA File Converter
+    planta-primer-piso.pdf           <- no se toca ni se mueve
+
+  planos2dwg/
+    convertir.bat
+    main.py
+    Convertidos_DWG/                 <- se crea aquí, no junto al PDF
+      planta-primer-piso.dxf         <- siempre se genera
+      planta-primer-piso.dwg         <- solo si está instalado ODA File Converter
 ```
 
 Un PDF de varias páginas genera un `.dxf`/`.dwg` por cada página, con el
