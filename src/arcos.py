@@ -30,6 +30,10 @@ _MIN_SPAN_DEG = 15.0
 _SPLIT_GAP_DEG = 20.0
 _MIN_ARC_LENGTH_MM = 6.0
 _MIN_COVERAGE = 0.45
+_BIG_RADIUS_MM = 68.0
+_BIG_RADIUS_MIN_SPAN_DEG = 35.0
+_MEDIUM_RADIUS_MM = 25.0
+_MEDIUM_RADIUS_MIN_SPAN_DEG = 25.0
 _MERGE_CENTRE_MM = 0.7
 _MERGE_RADIUS_MM = 0.5
 _ITERATIONS = 1500
@@ -183,6 +187,8 @@ def detect_arcs(segments: np.ndarray, dpi: int) -> tuple[list[Arc], np.ndarray]:
                 arc_length = math.radians(span) * radius
                 if span < _MIN_SPAN_DEG or arc_length < _MIN_ARC_LENGTH_MM * px_per_mm:
                     continue
+                if not _plausible(radius, span, px_per_mm):
+                    continue
                 inside = ((mid_angle - start) % 360.0) <= span
                 # un arco real está cubierto por trocitos a lo largo de toda su
                 # longitud; una recta casi plana tomada por curva apenas tiene apoyo
@@ -195,6 +201,20 @@ def detect_arcs(segments: np.ndarray, dpi: int) -> tuple[list[Arc], np.ndarray]:
     arcs = _merge_concentric(raw_arcs, px_per_mm)
     logger.info("Arcos: %d (de %d candidatos, %d segmentos usados).", len(arcs), len(raw_arcs), int(used.sum()))
     return arcs, used
+
+
+def _plausible(radius_px: float, span_deg: float, px_per_mm: float) -> bool:
+    """Un radio grande con un tramo corto es casi una recta, no una curva.
+
+    Las rectas largas (ejes, cotas) caben en una circunferencia enorme con
+    muy poca curvatura; las curvas reales de radio grande abarcan un tramo
+    amplio. Se exige más tramo cuanto mayor es el radio.
+    """
+    if radius_px > _BIG_RADIUS_MM * px_per_mm:
+        return span_deg >= _BIG_RADIUS_MIN_SPAN_DEG
+    if radius_px > _MEDIUM_RADIUS_MM * px_per_mm:
+        return span_deg >= _MEDIUM_RADIUS_MIN_SPAN_DEG
+    return True
 
 
 def _merge_concentric(arcs: list[Arc], px_per_mm: float) -> list[Arc]:

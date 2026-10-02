@@ -8,7 +8,7 @@ programación pueda instalarla y usarla en pocos minutos, arrastrando archivos.
 
 ## ⚠️ Qué hace y qué NO hace esta herramienta (leer antes de usar)
 
-El DXF que se genera tiene **capas**, para poder ver solo lo limpio o todo:
+Cada conversión entrega **dos archivos**: `..._limpio.dxf` (solo lo reconstruido: muros, ejes, arcos y textos; ordenado pero incompleto) y `..._completo.dxf` (lo mismo más el calco de referencia, con todo el dibujo del escaneo pero más sucio). Tienen **capas**:
 
 | Capa | Qué contiene | Calidad |
 |---|---|---|
@@ -111,7 +111,7 @@ misma carpeta del programa** (no junto al PDF original). El nombre de esa
 subcarpeta es fijo: el programa nunca pregunta cómo llamarla.
 
 > Cada conversión genera un archivo **nuevo con la fecha y hora en el nombre**
-> (por ejemplo `planta1_20261002_154715.dxf`). Así nunca se sobrescribe un
+> (por ejemplo `planta1_20261002_154715_limpio.dxf`). Así nunca se sobrescribe un
 > DXF que AutoCAD, OneDrive o el antivirus tengan abierto o bloqueado (si no,
 > AutoCAD avisa que el archivo "está en uso o es de solo lectura"). Borra a
 > mano las versiones viejas que ya no necesites.
@@ -158,8 +158,9 @@ Después de arrastrar planta-primer-piso.pdf sobre convertir.bat:
     convertir.bat
     main.py
     Convertidos_DWG/                 <- se crea aquí, no junto al PDF
-      planta-primer-piso.dxf         <- siempre se genera
-      planta-primer-piso.dwg         <- solo si está instalado ODA File Converter
+      planta-primer-piso_20261002_154715_limpio.dxf    <- solo lo reconstruido: muros, ejes, arcos, textos
+      planta-primer-piso_20261002_154715_completo.dxf  <- lo mismo + calco de referencia gris
+      (y los .dwg equivalentes si está instalado ODA File Converter)
 ```
 
 Un PDF de varias páginas genera un `.dxf`/`.dwg` por cada página, con el

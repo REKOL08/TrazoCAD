@@ -36,7 +36,8 @@ def test_main_guarda_resultados_en_subcarpeta_del_programa(
     assert exit_code == 0
     salida_dir = programa_dir / OUTPUT_SUBFOLDER_NAME
     assert salida_dir.is_dir()
-    assert len(list(salida_dir.glob("plano_*.dxf"))) == 1
+    nombres = sorted(p.name.split("_")[-1] for p in salida_dir.glob("plano_*.dxf"))
+    assert nombres == ["completo.dxf", "limpio.dxf"]
     # No debe dejar nada suelto junto al PDF original.
     assert not list(entrada_dir.glob("*.dxf"))
     assert not (entrada_dir / OUTPUT_SUBFOLDER_NAME).exists()
@@ -69,6 +70,7 @@ def test_cada_conversion_genera_un_archivo_nuevo_con_hora(
     segundo = converter.convert_pdf(pdf_path, salida, dpi=150, generate_dwg=False)
 
     assert primero.success and segundo.success
-    assert primero.outputs[0].name == "plano_20261002_100000.dxf"
-    assert segundo.outputs[0].name == "plano_20261002_100001.dxf"
+    assert primero.outputs[0].name == "plano_20261002_100000_completo.dxf"
+    assert primero.outputs[1].name == "plano_20261002_100000_limpio.dxf"
+    assert segundo.outputs[0].name == "plano_20261002_100001_completo.dxf"
     assert primero.outputs[0].exists() and segundo.outputs[0].exists()

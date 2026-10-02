@@ -74,6 +74,11 @@ class TextItem:
         """Esquina inferior izquierda del texto, donde se inserta el TEXT de CAD."""
         return float(self.quad[3][0]), float(self.quad[3][1])
 
+    @property
+    def baseline_end(self) -> tuple[float, float]:
+        """Esquina inferior derecha del texto: fin de la línea base."""
+        return float(self.quad[2][0]), float(self.quad[2][1])
+
     def contains(self, x: float, y: float) -> bool:
         return cv2.pointPolygonTest(self.quad.astype(np.float32), (float(x), float(y)), False) >= 0
 

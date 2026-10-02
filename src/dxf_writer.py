@@ -13,6 +13,7 @@ import logging
 from pathlib import Path
 
 import ezdxf
+from ezdxf.enums import TextEntityAlignment
 
 from .arcos import Arc
 from .line_detector import Segment
@@ -26,6 +27,7 @@ LAYER_TRACE = "CALCADO_REFERENCIA"
 LAYER_WALLS = "MUROS"
 LAYER_AXES = "EJES"
 LAYER_ARCS = "ARCOS"
+TEXT_STYLE = "PLANOS"
 LAYER_TEXT = "TEXTOS"
 LAYER_TEXT_REVIEW = "TEXTOS_REVISAR"
 _TEXT_HEIGHT_FACTOR = 0.78
@@ -63,6 +65,9 @@ def build_dxf(
     document = ezdxf.new(dxfversion="R2010", setup=True, units=ezdxf.units.MM)
     document.header["$INSUNITS"] = ezdxf.units.MM
     document.header["$LWDISPLAY"] = 1  # que AutoCAD muestre los grosores de línea por capa
+
+    if TEXT_STYLE not in document.styles:
+        document.styles.add(TEXT_STYLE, font="arial.ttf")
 
     layers = document.layers
     if LAYER_LINES not in layers:
@@ -108,10 +113,15 @@ def build_dxf(
         entity = modelspace.add_text(
             item.text,
             height=_px_to_mm(item.height_px, dpi) * _TEXT_HEIGHT_FACTOR,
-            rotation=item.angle_deg,
-            dxfattribs={"layer": LAYER_TEXT if item.sure else LAYER_TEXT_REVIEW},
+            dxfattribs={
+                "layer": LAYER_TEXT if item.sure else LAYER_TEXT_REVIEW,
+                "style": TEXT_STYLE,
+            },
         )
-        entity.set_placement(to_mm(*item.baseline_start))
+        # ajustado a lo largo de la caja leída: el texto ocupa el mismo ancho que el original
+        entity.set_placement(
+            to_mm(*item.baseline_start), to_mm(*item.baseline_end), align=TextEntityAlignment.FIT
+        )
 
     for polyline in polylines:
         modelspace.add_lwpolyline(
