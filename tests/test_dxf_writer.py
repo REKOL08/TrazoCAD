@@ -147,3 +147,19 @@ def test_las_cifras_de_cota_van_en_su_capa(tmp_path: Path) -> None:
 
     capas = {e.dxf.text: e.dxf.layer for e in ezdxf.readfile(salida).modelspace().query("TEXT")}
     assert capas == {"2.05": LAYER_DIMENSIONS, "COCINA": LAYER_TEXT}
+
+
+def test_build_dxf_escribe_sanitarios_como_elipses(tmp_path: Path) -> None:
+    from src.dxf_writer import LAYER_FIXTURES
+    from src.muebles import Fixture
+
+    taza = Fixture("INODORO", 300.0, 400.0, 59.0, 35.0, 0.0)  # 59 px a 300 dpi = 5 mm
+    salida = tmp_path / "san.dxf"
+
+    build_dxf([], dpi=300, image_height_px=1000, output_path=salida, fixtures=[taza])
+
+    elipses = list(ezdxf.readfile(salida).modelspace().query("ELLIPSE"))
+    assert len(elipses) == 1
+    assert elipses[0].dxf.layer == LAYER_FIXTURES
+    assert abs(elipses[0].dxf.ratio - 35.0 / 59.0) < 1e-6
+    assert abs(elipses[0].dxf.major_axis.x - 2.5) < 0.05  # semieje mayor de 2.5 mm

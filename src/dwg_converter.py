@@ -28,6 +28,7 @@ _CANDIDATE_DIRS = [
 ]
 
 DWG_OUTPUT_VERSION = "ACAD2018"
+_WARNED_MISSING = False
 
 
 def find_oda_file_converter() -> Path | None:
@@ -65,8 +66,12 @@ def convert_dxf_to_dwg(
     disponible o la conversión falla (en ambos casos el DXF ya generado
     sigue siendo un resultado válido y utilizable en AutoCAD).
     """
+    global _WARNED_MISSING
     converter = oda_converter_path or find_oda_file_converter()
     if converter is None:
+        if _WARNED_MISSING:
+            return None
+        _WARNED_MISSING = True
         logger.warning(
             "ODA File Converter no está instalado: se entrega el plano en "
             "formato DXF (AutoCAD lo abre igual). Instálalo si necesitas "

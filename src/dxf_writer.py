@@ -10,6 +10,7 @@ nativa igual que un .dwg; la conversión opcional a .dwg real se hace en
 from __future__ import annotations
 
 import logging
+import math
 import re
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from ezdxf.enums import TextEntityAlignment
 
 from .arcos import Arc
 from .line_detector import Segment
+from .muebles import Fixture
 from .puertas import Door
 from .texto import TextItem
 from .ventanas import Window
@@ -31,6 +33,7 @@ LAYER_WALLS = "MUROS"
 LAYER_AXES = "EJES"
 LAYER_ARCS = "ARCOS"
 LAYER_DOORS = "PUERTAS"
+LAYER_FIXTURES = "SANITARIOS"
 LAYER_WINDOWS = "VENTANAS"
 TEXT_STYLE = "PLANOS"
 LAYER_DIMENSIONS = "COTAS"
@@ -64,6 +67,7 @@ def build_dxf(
     texts: list[TextItem] | None = None,
     doors: list[Door] | None = None,
     windows: list[Window] | None = None,
+    fixtures: list[Fixture] | None = None,
 ) -> Path:
     """Escribe `segments` y `polylines` (en píxeles) en un DXF nuevo.
 
@@ -79,6 +83,7 @@ def build_dxf(
     texts = texts or []
     doors = doors or []
     windows = windows or []
+    fixtures = fixtures or []
 
     document = ezdxf.new(dxfversion="R2010", setup=True, units=ezdxf.units.MM)
     document.header["$INSUNITS"] = ezdxf.units.MM
@@ -100,6 +105,8 @@ def build_dxf(
         layers.add(name=LAYER_TEXT, color=5)
     if LAYER_TEXT_REVIEW not in layers:
         layers.add(name=LAYER_TEXT_REVIEW, color=30)
+    if LAYER_FIXTURES not in layers:
+        layers.add(name=LAYER_FIXTURES, color=6, lineweight=18)
     if LAYER_WINDOWS not in layers:
         layers.add(name=LAYER_WINDOWS, color=4, lineweight=18)
     if LAYER_DOORS not in layers:
@@ -132,6 +139,18 @@ def build_dxf(
             modelspace.add_arc(
                 centre, radius, arc.start_deg, arc.end_deg, dxfattribs={"layer": LAYER_ARCS}
             )
+
+    for fixture in fixtures:
+        theta = math.radians(fixture.angle_deg)
+        centre = (fixture.cx, fixture.cy)
+        tip = (centre[0] + math.cos(theta) * fixture.major / 2, centre[1] + math.sin(theta) * fixture.major / 2)
+        (cx, cy), (tx, ty) = to_mm(*centre), to_mm(*tip)
+        modelspace.add_ellipse(
+            center=(cx, cy),
+            major_axis=(tx - cx, ty - cy),
+            ratio=fixture.minor / fixture.major,
+            dxfattribs={"layer": LAYER_FIXTURES},
+        )
 
     for window in windows:
         for (x1, y1), (x2, y2) in window.lines:
@@ -173,7 +192,7 @@ def build_dxf(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     document.saveas(output_path)
     logger.info(
-        "DXF generado: %s (%d líneas, %d muros, %d ejes, %d arcos, %d puertas, %d ventanas, %d textos, %d trazos de referencia)",
+        "DXF generado: %s (%d líneas, %d muros, %d ejes, %d arcos, %d puertas, %d ventanas, %d sanitarios, %d textos, %d trazos de referencia)",
         output_path,
         len(segments),
         len(walls),
@@ -181,6 +200,7 @@ def build_dxf(
         len(arcs),
         len(doors),
         len(windows),
+        len(fixtures),
         len(texts),
         len(polylines),
     )

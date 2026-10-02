@@ -15,6 +15,7 @@ from .dwg_converter import convert_dxf_to_dwg
 from .deskew import deskew
 from .dxf_writer import build_dxf
 from .line_detector import detect_lines, filter_short_segments, merge_collinear_segments
+from .muebles import detect_fixtures
 from .muros import detect_plan
 from .puertas import detect_doors
 from .ventanas import detect_windows
@@ -193,6 +194,7 @@ def convert_pdf(
             texts: list = []
             doors: list = []
             windows: list = []
+            fixtures: list = []
             if mode == MODE_LINES:
                 segments = detect_lines(image)
                 segments = merge_collinear_segments(segments, dpi=page.dpi)
@@ -213,20 +215,22 @@ def convert_pdf(
                 )
                 if read_text:
                     texts = read_texts(image, ignore_bottom_fraction=ignore_bottom_fraction)
+                fixtures = detect_fixtures(image, page.dpi, texts, wall_thickness_px=thickness)
                 if not clean_only:
                     polylines = _without_read_letters(trace_ink(image, dpi=page.dpi), texts)
                     before = len(polylines)
                     polylines = _without_explained(
                         polylines,
                         list(walls) + list(axes) + _arc_segments(arcs) + _door_segments(doors)
-                        + [line for window in windows for line in window.lines],
+                        + [line for window in windows for line in window.lines]
+                        + [seg for f in fixtures for seg in zip(f.outline(), f.outline()[1:])],
                         tol_px=0.45 * page.dpi / 25.4,
                     )
                     logger.info(
                         "Calco: %d contornos ya explicados por muros, ejes y arcos se quitan.",
                         before - len(polylines),
                     )
-            if not any((segments, polylines, walls, axes, arcs, texts, doors, windows)):
+            if not any((segments, polylines, walls, axes, arcs, texts, doors, windows, fixtures)):
                 logger.warning(
                     "'%s' página %d: no se detectó geometría; se omite esta página.",
                     pdf_path.name,
@@ -259,6 +263,7 @@ def convert_pdf(
                     texts=texts,
                     doors=doors,
                     windows=windows,
+                    fixtures=fixtures,
                 )
                 outputs.append(dxf_path)
                 if generate_dwg:
