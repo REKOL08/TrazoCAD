@@ -114,6 +114,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--grosor-muro",
+        type=float,
+        default=None,
+        help=(
+            "Espesor de los muros en milímetros sobre el papel. Si se omite, se mide solo "
+            "el espesor más repetido del plano."
+        ),
+    )
+    parser.add_argument(
         "--solo-limpio",
         action="store_true",
         help="No incluir la capa CALCADO_REFERENCIA: solo muros y ejes reconstruidos.",
@@ -181,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
             rotation=args.rotar,
             ignore_bottom_fraction=args.ignorar_inferior,
             clean_only=args.solo_limpio,
+            wall_thickness_mm=args.grosor_muro,
         )
         if result.success:
             successes += 1

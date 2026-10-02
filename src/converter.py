@@ -58,6 +58,7 @@ def convert_pdf(
     rotation: int = 0,
     ignore_bottom_fraction: float = 0.0,
     clean_only: bool = False,
+    wall_thickness_mm: float | None = None,
 ) -> ConversionResult:
     """Convierte un único PDF a uno o varios archivos DXF/DWG (uno por página).
 
@@ -86,7 +87,10 @@ def convert_pdf(
                 )
             else:
                 walls, axes, arcs = detect_walls_and_axes(
-                    image, page.dpi, ignore_bottom_fraction=ignore_bottom_fraction
+                    image,
+                    page.dpi,
+                    ignore_bottom_fraction=ignore_bottom_fraction,
+                    wall_thickness_mm=wall_thickness_mm,
                 )
                 if not clean_only:
                     polylines = trace_ink(image, dpi=page.dpi)

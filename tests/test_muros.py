@@ -77,3 +77,69 @@ def test_detecta_un_arco_dibujado() -> None:
     assert abs(arco.cx - 600) < 6 and abs(arco.cy - 600) < 6
     assert abs(arco.radius - 300) < 6
     assert not arco.is_circle
+
+
+def _muro_doble_horizontal(image: np.ndarray, y: int, x1: int, x2: int, separacion: int) -> None:
+    cv2.line(image, (x1, y), (x2, y), 0, 3)
+    cv2.line(image, (x1, y + separacion), (x2, y + separacion), 0, 3)
+
+
+def _muro_doble_vertical(image: np.ndarray, x: int, y1: int, y2: int, separacion: int) -> None:
+    cv2.line(image, (x, y1), (x, y2), 0, 3)
+    cv2.line(image, (x + separacion, y1), (x + separacion, y2), 0, 3)
+
+
+def _plano_con_cuatro_muros() -> np.ndarray:
+    image = np.full((1100, 1400), 255, dtype=np.uint8)
+    for y in (100, 300, 500):
+        _muro_doble_horizontal(image, y, 100, 900, 13)
+    for x in (100, 500, 890):
+        _muro_doble_vertical(image, x, 100, 513, 13)
+    return image
+
+
+def test_descarta_fila_de_cotas_con_otra_separacion() -> None:
+    image = _plano_con_cuatro_muros()
+    # dos líneas paralelas a 26 px que no tocan ningún muro: una fila de cotas
+    _muro_doble_horizontal(image, 800, 100, 900, 26)
+
+    muros, _ejes, _arcos = detect_walls_and_axes(image, dpi=300)
+
+    ys = [(s[0][1] + s[1][1]) / 2 for s in muros if abs(s[0][0] - s[1][0]) > 1]
+    assert ys, "los muros del espesor dominante deben detectarse"
+    assert not any(700 < y < 900 for y in ys)
+
+
+def test_conserva_un_muro_grueso_que_toca_un_muro_normal() -> None:
+    image = _plano_con_cuatro_muros()
+    # muro exterior más grueso (26 px) que arranca pegado al muro vertical de x=900
+    _muro_doble_horizontal(image, 700, 900, 1300, 26)
+    _muro_doble_vertical(image, 900, 513, 726, 13)
+
+    muros, _ejes, _arcos = detect_walls_and_axes(image, dpi=300)
+
+    gruesos = [s for s in muros if abs(s[0][0] - s[1][0]) > 1 and 690 < s[0][1] < 740]
+    assert len(gruesos) >= 2
+
+
+def test_descarta_un_grupo_corto_y_aislado_como_un_mueble() -> None:
+    image = _plano_con_cuatro_muros()
+    _muro_doble_horizontal(image, 900, 300, 400, 13)  # 100 px = 8 mm, sin conexión
+
+    muros, _ejes, _arcos = detect_walls_and_axes(image, dpi=300)
+
+    assert not any(850 < (s[0][1] + s[1][1]) / 2 < 950 for s in muros)
+
+
+def test_detecta_ejes_de_rayas_cortas() -> None:
+    image = np.full((600, 1800), 255, dtype=np.uint8)
+    x = 100
+    while x < 1700:
+        cv2.line(image, (x, 300), (x + 22, 300), 0, 2)  # rayas de ~2 mm a 300 dpi
+        x += 40
+
+    _muros, ejes, _arcos = detect_walls_and_axes(image, dpi=300)
+
+    assert len(ejes) == 1
+    (x1, _), (x2, _) = ejes[0]
+    assert abs(x2 - x1) > 1400

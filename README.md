@@ -12,9 +12,9 @@ El DXF que se genera tiene **capas**, para poder ver solo lo limpio o todo:
 
 | Capa | Qué contiene | Calidad |
 |---|---|---|
-| `MUROS` | Caras de muros como líneas **rectas, paralelas y enderezadas** (horizontal/vertical exactas), con esquinas prolongadas hasta cruzarse y los extremos libres cerrados con un remate | Limpia, pero **parcial**: faltan tramos, y a veces entran líneas de cotas o muebles que parecen muro |
+| `MUROS` | Caras de muros como líneas **rectas, paralelas y enderezadas** (horizontal/vertical exactas), con esquinas prolongadas hasta cruzarse y los extremos libres cerrados con un remate | Limpia, pero **parcial**: faltan tramos. Se descartan las filas de cotas (otra separación entre líneas) y los contornos cortos aislados como muebles |
 | `ARCOS` | Arcos y círculos reales (`ARC`/`CIRCLE`): muros curvos, puertas batientes, escaleras circulares | Buena en curvas grandes; puede haber algún arco falso o faltar uno |
-| `EJES` | Ejes largos de trazo y punto (tipo de línea `CENTER`) | Limpia, pero **incompleta**: detecta algunos, no todos |
+| `EJES` | Ejes de trazo y punto (tipo de línea `CENTER`): la cuadrícula de letras y números y algunos radiales | Buena en la cuadrícula; puede faltar algún eje radial y no toma como eje las líneas de corte continuas |
 | `CALCADO_REFERENCIA` | Calco fiel de toda la tinta del escaneo (textos, símbolos, cotas, curvas) como polilíneas, con las líneas largas suavizadas y enderezadas | Se ve como el PDF; es una **referencia para calcar encima**, apágala (`LAYER OFF`) para ver solo lo limpio |
 
 - **No son objetos CAD "inteligentes"**: los textos no son `TEXT` editable
@@ -114,6 +114,7 @@ python main.py planta1.pdf --dpi 400            # usar más resolución
 python main.py planta1.pdf --rotar 90           # el escaneo está de lado
 python main.py planta1.pdf --ignorar-inferior 0.17  # no confundir el rótulo con muros
 python main.py planta1.pdf --solo-limpio        # solo MUROS y EJES, sin el calcado de referencia
+python main.py planta1.pdf --grosor-muro 1.0    # espesor de muro en mm sobre el papel (si no, se mide solo)
 python main.py planta1.pdf --modo lineas        # solo líneas rectas (modo alterno)
 python main.py planta1.pdf --no-dwg             # generar solo .dxf, sin intentar .dwg
 python main.py planta1.pdf --verbose            # ver más detalle en consola/log

@@ -36,8 +36,12 @@ _PAIR_MIN_OVERLAP = 0.6
 _SNAP_ANGLE_DEG = 1.5
 _CORNER_REACH_MM = 4.0
 _CAP_ALIGN_MM = 0.5
+_THICKNESS_WINDOW = (0.7, 1.45)
+_MIN_CLUSTER_EXTENT_MM = 15.0
+_CLUSTER_TOUCH_MM = 0.3
 
-_AXIS_MIN_PIECE_MM = 3.0
+_WALL_PIECE_MM = 3.0
+_AXIS_MIN_PIECE_MM = 1.2
 _AXIS_GAP_MM = 14.0
 _AXIS_MIN_SPAN_MM = 40.0
 _AXIS_MIN_PIECES = 3
@@ -63,11 +67,11 @@ def _lsd_segments(image: np.ndarray, dpi: int) -> np.ndarray:
 
 def _paired_indices(segments: np.ndarray, px_per_mm: float) -> set[int]:
     """Índices de los segmentos que tienen un paralelo cercano (cara de muro)."""
-    return {k for pair in _face_pairs(segments, px_per_mm) for k in pair}
+    return {k for i, j, _gap in _face_pairs(segments, px_per_mm) for k in (i, j)}
 
 
-def _face_pairs(segments: np.ndarray, px_per_mm: float) -> list[tuple[int, int]]:
-    """Pares (i, j) de segmentos paralelos a distancia de muro y con solape."""
+def _face_pairs(segments: np.ndarray, px_per_mm: float) -> list[tuple[int, int, float]]:
+    """Pares (i, j, separación) de segmentos paralelos a distancia de muro y con solape."""
     count = len(segments)
     if count < 2:
         return []
@@ -86,7 +90,7 @@ def _face_pairs(segments: np.ndarray, px_per_mm: float) -> list[tuple[int, int]]
     max_gap = _WALL_THICKNESS_MM[1] * px_per_mm
     angle_tol = math.radians(_PAIR_ANGLE_DEG)
 
-    pairs: list[tuple[int, int]] = []
+    pairs: list[tuple[int, int, float]] = []
     for i in range(count - 1):
         rest = slice(i + 1, count)
         delta = np.abs(angle[i] - angle[rest])
@@ -108,11 +112,13 @@ def _face_pairs(segments: np.ndarray, px_per_mm: float) -> list[tuple[int, int]]
             & (overlap >= 0.8 * _WALL_MIN_LENGTH_MM * px_per_mm)
         )
         for offset in np.nonzero(match)[0]:
-            pairs.append((i, i + 1 + int(offset)))
+            pairs.append((i, i + 1 + int(offset), float(gap[offset])))
     return pairs
 
 
-def _merge_stroke_edges(segments: np.ndarray, px_per_mm: float) -> list[Segment]:
+def _merge_stroke_edges(
+    segments: np.ndarray, px_per_mm: float
+) -> tuple[list[Segment], list[float]]:
     """Funde los dos bordes de cada trazo grueso en una línea central.
 
     LSD devuelve cada segmento orientado con el lado oscuro siempre del mismo
@@ -124,7 +130,7 @@ def _merge_stroke_edges(segments: np.ndarray, px_per_mm: float) -> list[Segment]
     """
     count = len(segments)
     if count == 0:
-        return []
+        return [], []
 
     dx = segments[:, 2] - segments[:, 0]
     dy = segments[:, 3] - segments[:, 1]
@@ -138,6 +144,7 @@ def _merge_stroke_edges(segments: np.ndarray, px_per_mm: float) -> list[Segment]
     angle_tol = math.radians(3.0)
     consumed = np.zeros(count, dtype=bool)
     result: list[Segment] = []
+    widths: list[float] = []
 
     for i in range(count):
         if consumed[i]:
@@ -156,19 +163,22 @@ def _merge_stroke_edges(segments: np.ndarray, px_per_mm: float) -> list[Segment]
         b = (segments[rest, 2] - segments[i, 0]) * ux[i] + (segments[rest, 3] - segments[i, 1]) * uy[i]
         low_j, high_j = np.minimum(a, b), np.maximum(a, b)
         overlap = np.minimum(length[i], high_j) - np.maximum(0.0, low_j)
-        shortest = np.minimum(length[i], high_j - low_j)
+        longest = np.maximum(length[i], high_j - low_j)
 
         ok = (
             (cross <= math.sin(angle_tol))
             & (toward_j > 0.8)
             & (toward_j <= max_width)
             & (toward_i > 0.8)
-            & (overlap >= 0.5 * shortest)
+            # los dos bordes de un mismo trazo coinciden casi por completo; así una raya
+            # corta vecina no se funde con el borde largo de un muro
+            & (overlap >= 0.6 * longest)
         )
         candidates = np.nonzero(ok)[0]
         if len(candidates) == 0:
             continue
-        best = rest[candidates[np.argmax(overlap[candidates])]]
+        best_local = candidates[np.argmax(overlap[candidates])]
+        best = rest[best_local]
         consumed[i] = consumed[best] = True
 
         # línea central: promedio de los dos bordes, tramo = unión de ambos
@@ -186,6 +196,7 @@ def _merge_stroke_edges(segments: np.ndarray, px_per_mm: float) -> list[Segment]
         # quitar la componente a lo largo de la línea del desplazamiento
         along = shift_x * direction[0] + shift_y * direction[1]
         shift_x, shift_y = shift_x - along * direction[0], shift_y - along * direction[1]
+        widths.append(float(toward_j[best_local]))
         result.append(
             (
                 (start_i[0] + lo * direction[0] + shift_x, start_i[1] + lo * direction[1] + shift_y),
@@ -195,8 +206,9 @@ def _merge_stroke_edges(segments: np.ndarray, px_per_mm: float) -> list[Segment]
 
     for i in range(count):
         if not consumed[i]:
+            widths.append(0.0)
             result.append(((float(segments[i, 0]), float(segments[i, 1])), (float(segments[i, 2]), float(segments[i, 3]))))
-    return result
+    return result, widths
 
 
 def _snap_axis_aligned(segments: list[Segment]) -> list[Segment]:
@@ -286,7 +298,7 @@ def _end_caps(walls: list[Segment], px_per_mm: float) -> list[Segment]:
     touch_tol = 2.5 * px_per_mm / 11.8
     caps: dict[tuple[int, int, int, int], Segment] = {}
 
-    for i, j in _face_pairs(array, px_per_mm):
+    for i, j, _gap in _face_pairs(array, px_per_mm):
         a, b = walls[i], walls[j]
         length = math.dist(a[0], a[1])
         if length == 0:
@@ -305,15 +317,123 @@ def _end_caps(walls: list[Segment], px_per_mm: float) -> list[Segment]:
     return list(caps.values())
 
 
+def _keep_connected_loose(walls: list[Segment], core_count: int, px_per_mm: float) -> list[Segment]:
+    """Conserva las caras gruesas solo si enlazan (por extremo) con un muro ya aceptado."""
+    tol = _CLUSTER_TOUCH_MM * px_per_mm * 2
+    accepted = list(range(core_count))
+    pending = list(range(core_count, len(walls)))
+    for _ in range(3):
+        still_pending = []
+        for index in pending:
+            tips = walls[index]
+            touches = any(
+                _point_touches(tip, [walls[k]], set(), tol) for tip in tips for k in accepted
+            ) or any(
+                _point_touches(tip, [walls[index]], set(), tol) for k in accepted for tip in walls[k]
+            )
+            (accepted if touches else still_pending).append(index)
+        if len(still_pending) == len(pending):
+            break
+        pending = still_pending
+    return [walls[k] for k in sorted(accepted)]
+
+
+def _pieces_away_from(
+    pieces: list[Segment], segments: list[Segment], tol: float
+) -> list[Segment]:
+    """Piezas cuyo punto medio queda a más de `tol` de todos los `segments`."""
+    if not pieces or not segments:
+        return list(pieces)
+    points = np.array([[(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] for a, b in pieces])
+    starts = np.array([a for a, _b in segments], dtype=np.float64)
+    ends = np.array([b for _a, b in segments], dtype=np.float64)
+    along = ends - starts
+    squared = np.maximum((along**2).sum(axis=1), 1e-9)
+    t = np.clip(
+        ((points[:, None, :] - starts[None, :, :]) * along[None, :, :]).sum(axis=2) / squared,
+        0.0,
+        1.0,
+    )
+    nearest = starts[None, :, :] + t[:, :, None] * along[None, :, :]
+    distance = np.hypot(*(points[:, None, :] - nearest).transpose(2, 0, 1))
+    return [piece for piece, d in zip(pieces, distance.min(axis=1)) if d > tol]
+
+
+def _dominant_thickness(gaps: list[float]) -> float | None:
+    """Espesor de muro repetido más delgado entre las separaciones de los pares (px).
+
+    En un plano conviven dos dobles líneas que se repiten: los muros y las filas
+    de cotas, que casi siempre están más separadas. Por eso no se elige el pico
+    más alto sino el más bajo que tenga al menos la mitad de apoyo que el mayor.
+    """
+    if len(gaps) < 5:
+        return None
+    low, high = int(math.floor(min(gaps))), int(math.ceil(max(gaps))) + 1
+    counts, edges = np.histogram(gaps, bins=np.arange(low, high + 1, 1.0))
+    smooth = np.convolve(counts, np.ones(3) / 3, mode="same")
+    threshold = 0.5 * float(smooth.max())
+    for k in range(len(smooth)):
+        left = smooth[k - 1] if k > 0 else -1.0
+        right = smooth[k + 1] if k + 1 < len(smooth) else -1.0
+        if smooth[k] >= threshold and smooth[k] >= left and smooth[k] > right:
+            return float((edges[k] + edges[k + 1]) / 2)
+    return None
+
+
+def _drop_small_clusters(walls: list[Segment], px_per_mm: float) -> list[Segment]:
+    """Quita los grupos pequeños y aislados de caras (muebles, sanitarios, peldaños).
+
+    Un muro real forma una red larga y conectada; un mueble es un contorno
+    corto que no se prolonga. Se agrupan las caras que se tocan y se
+    descartan los grupos cuya extensión es menor que `_MIN_CLUSTER_EXTENT_MM`.
+    """
+    count = len(walls)
+    if count == 0:
+        return walls
+    tol = _CLUSTER_TOUCH_MM * px_per_mm
+    parent = list(range(count))
+
+    def find(node: int) -> int:
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    for i, (a, b) in enumerate(walls):
+        for tip in (a, b):
+            for j, (c, d) in enumerate(walls):
+                if i == j or find(i) == find(j):
+                    continue
+                if _point_touches(tip, [(c, d)], set(), tol):
+                    parent[find(i)] = find(j)
+
+    members: dict[int, list[int]] = {}
+    for index in range(count):
+        members.setdefault(find(index), []).append(index)
+
+    kept: list[Segment] = []
+    limit = _MIN_CLUSTER_EXTENT_MM * px_per_mm
+    for indices in members.values():
+        xs = [p[0] for k in indices for p in walls[k]]
+        ys = [p[1] for k in indices for p in walls[k]]
+        if max(max(xs) - min(xs), max(ys) - min(ys)) >= limit:
+            kept.extend(walls[k] for k in indices)
+    return kept
+
+
 def detect_walls_and_axes(
     image: np.ndarray,
     dpi: int,
     ignore_bottom_fraction: float = 0.0,
+    wall_thickness_mm: float | None = None,
 ) -> tuple[list[Segment], list[Segment], list[Arc]]:
     """Devuelve (caras de muro, ejes, arcos); segmentos en píxeles.
 
     `ignore_bottom_fraction` descarta la franja inferior de la imagen (por
     ejemplo el rótulo del plano) para que no se confunda con muros.
+    `wall_thickness_mm` fija el espesor de muro sobre el papel; si no se da,
+    se mide el espesor más repetido del plano y solo se aceptan pares cercanos
+    a él (las filas de cotas tienen otras separaciones).
     """
     px_per_mm = dpi / _MM_PER_INCH
     segments = _lsd_segments(image, dpi)
@@ -330,31 +450,70 @@ def detect_walls_and_axes(
     segments = segments[~arc_used]
 
     lengths = np.hypot(segments[:, 2] - segments[:, 0], segments[:, 3] - segments[:, 1])
-    segments = segments[lengths >= _AXIS_MIN_PIECE_MM * px_per_mm]
+    tiny = segments[
+        (lengths >= _AXIS_MIN_PIECE_MM * px_per_mm) & (lengths < _WALL_PIECE_MM * px_per_mm)
+    ]
+    segments = segments[lengths >= _WALL_PIECE_MM * px_per_mm]
 
     # LSD devuelve los dos bordes de cada trazo grueso: se funden en una sola
     # línea central antes de buscar pares de caras de muro.
-    strokes = merge_collinear_segments(
-        _merge_stroke_edges(segments, px_per_mm), dpi=dpi
-    )
+    edge_strokes, _widths = _merge_stroke_edges(segments, px_per_mm)
+    strokes = merge_collinear_segments(edge_strokes, dpi=dpi)
     if not strokes:
-        return [], [], arcs
+        # sin trazos largos solo pueden quedar ejes de rayas cortas
+        tiny_strokes, _ = _merge_stroke_edges(tiny, px_per_mm)
+        return [], _axes_from_pieces(tiny_strokes, dpi, px_per_mm), arcs
     stroke_array = np.array([[a[0], a[1], b[0], b[1]] for a, b in strokes], dtype=np.float64)
     stroke_lengths = np.hypot(
         stroke_array[:, 2] - stroke_array[:, 0], stroke_array[:, 3] - stroke_array[:, 1]
     )
 
     candidate_ids = np.nonzero(stroke_lengths >= _WALL_MIN_LENGTH_MM * px_per_mm)[0]
-    local_paired = _paired_indices(stroke_array[candidate_ids], px_per_mm)
-    paired_ids = {int(candidate_ids[k]) for k in local_paired}
+    pairs = _face_pairs(stroke_array[candidate_ids], px_per_mm)
+    thickness = (
+        wall_thickness_mm * px_per_mm
+        if wall_thickness_mm
+        else _dominant_thickness([gap for _i, _j, gap in pairs])
+    )
+    loose_pairs: list[tuple[int, int, float]] = []
+    if thickness is not None:
+        low, high = thickness * _THICKNESS_WINDOW[0], thickness * _THICKNESS_WINDOW[1]
+        if wall_thickness_mm:
+            low, high = thickness * 0.75, thickness * 1.25
+        before = len(pairs)
+        core_pairs = [pair for pair in pairs if low <= pair[2] <= high]
+        if not wall_thickness_mm:
+            # los pares más gruesos (muros exteriores) solo valen si tocan un muro
+            # del espesor dominante; las filas de cotas no tocan ninguno
+            loose_pairs = [pair for pair in pairs if pair[2] > high]
+        pairs = core_pairs
+        logger.info(
+            "Espesor de muro %.1f px (%.2f mm): %d de %d pares son del espesor dominante, "
+            "%d más gruesos pendientes de comprobar.",
+            thickness,
+            thickness / px_per_mm,
+            len(pairs),
+            before,
+            len(loose_pairs),
+        )
+    paired_ids = {int(candidate_ids[k]) for pair in pairs for k in pair[:2]}
+    loose_ids = {int(candidate_ids[k]) for pair in loose_pairs for k in pair[:2]} - paired_ids
 
     wall_raw = [strokes[k] for k in sorted(paired_ids)]
-    walls = merge_collinear_segments(wall_raw, dpi=dpi)
-    walls = _snap_axis_aligned(walls)
+    core = merge_collinear_segments(wall_raw, dpi=dpi)
+    loose = merge_collinear_segments([strokes[k] for k in sorted(loose_ids)], dpi=dpi) if loose_ids else []
+    walls = _snap_axis_aligned(core + loose)
     walls = _extend_to_corners(walls, _CORNER_REACH_MM * px_per_mm)
+    walls = _keep_connected_loose(walls, len(core), px_per_mm)
+    walls = _drop_small_clusters(walls, px_per_mm)
     walls = walls + _end_caps(walls, px_per_mm)
+    paired_ids |= loose_ids
 
     axis_pieces = [stroke for k, stroke in enumerate(strokes) if k not in paired_ids]
+    # las rayas cortas de los ejes (1-3 mm) solo cuentan si no caen sobre un muro
+    tiny_strokes, _ = _merge_stroke_edges(tiny, px_per_mm)
+    wall_lines = [strokes[k] for k in sorted(paired_ids)]
+    axis_pieces += _pieces_away_from(tiny_strokes, wall_lines, 0.45 * px_per_mm)
     axes = _axes_from_pieces(axis_pieces, dpi, px_per_mm)
 
     logger.info(
