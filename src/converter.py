@@ -3,18 +3,34 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import numpy as np
 
 from .dwg_converter import convert_dxf_to_dwg
 from .dxf_writer import build_dxf
 from .line_detector import detect_lines, filter_short_segments, merge_collinear_segments
 from .pdf_processor import render_pdf_pages
 from .utils import ConversionError, validate_pdf
+from .vectorizer import trace_ink
 
 logger = logging.getLogger("planos2dwg")
 
 DEFAULT_MIN_LENGTH_MM = 8.0
+MODE_TRACE = "fiel"
+MODE_LINES = "lineas"
+VALID_ROTATIONS = (0, 90, 180, 270)
+
+
+def rotate_image(image: np.ndarray, degrees_ccw: int) -> np.ndarray:
+    """Gira `image` en sentido antihorario (0, 90, 180 o 270 grados)."""
+    if degrees_ccw not in VALID_ROTATIONS:
+        raise ConversionError(f"El giro debe ser uno de {VALID_ROTATIONS}, no {degrees_ccw}.")
+    if degrees_ccw == 0:
+        return image
+    return np.ascontiguousarray(np.rot90(image, degrees_ccw // 90))
 
 
 @dataclass
@@ -31,6 +47,8 @@ def convert_pdf(
     dpi: int,
     generate_dwg: bool = True,
     min_length_mm: float = DEFAULT_MIN_LENGTH_MM,
+    mode: str = MODE_TRACE,
+    rotation: int = 0,
 ) -> ConversionResult:
     """Convierte un único PDF a uno o varios archivos DXF/DWG (uno por página).
 
@@ -45,10 +63,18 @@ def convert_pdf(
 
         outputs: list[Path] = []
         for page in pages:
-            segments = detect_lines(page.image)
-            segments = merge_collinear_segments(segments, dpi=page.dpi)
-            segments = filter_short_segments(segments, min_length_mm=min_length_mm, dpi=page.dpi)
-            if not segments:
+            image = rotate_image(page.image, rotation)
+            segments: list = []
+            polylines: list = []
+            if mode == MODE_LINES:
+                segments = detect_lines(image)
+                segments = merge_collinear_segments(segments, dpi=page.dpi)
+                segments = filter_short_segments(
+                    segments, min_length_mm=min_length_mm, dpi=page.dpi
+                )
+            else:
+                polylines = trace_ink(image, dpi=page.dpi)
+            if not segments and not polylines:
                 logger.warning(
                     "'%s' página %d: no se detectó geometría; se omite esta página.",
                     pdf_path.name,
@@ -58,12 +84,30 @@ def convert_pdf(
 
             suffix = "" if len(pages) == 1 else f"_p{page.page_number}"
             dxf_path = output_dir / f"{pdf_path.stem}{suffix}.dxf"
-            build_dxf(
-                segments,
-                dpi=page.dpi,
-                image_height_px=page.image.shape[0],
-                output_path=dxf_path,
-            )
+            try:
+                build_dxf(
+                    segments,
+                    dpi=page.dpi,
+                    image_height_px=image.shape[0],
+                    output_path=dxf_path,
+                    polylines=polylines,
+                )
+            except PermissionError:
+                # El DXF anterior suele estar abierto en AutoCAD y Windows no
+                # permite sobrescribirlo: se guarda uno nuevo con la hora.
+                stamp = datetime.now().strftime("%H%M%S")
+                dxf_path = dxf_path.with_name(f"{dxf_path.stem}_{stamp}.dxf")
+                logger.warning(
+                    "El archivo anterior está en uso (¿abierto en AutoCAD?); se guarda como %s",
+                    dxf_path.name,
+                )
+                build_dxf(
+                    segments,
+                    dpi=page.dpi,
+                    image_height_px=image.shape[0],
+                    output_path=dxf_path,
+                    polylines=polylines,
+                )
             outputs.append(dxf_path)
 
             if generate_dwg:

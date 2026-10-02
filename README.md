@@ -8,25 +8,30 @@ programación pueda instalarla y usarla en pocos minutos, arrastrando archivos.
 
 ## ⚠️ Qué hace y qué NO hace esta herramienta (leer antes de usar)
 
-- Detecta **líneas rectas** en el escaneo (muros, ejes, contornos) usando
-  visión por computador y las convierte en geometría vectorial editable.
-- **No reconoce símbolos, bloques, achurados ni texto** automáticamente. El
-  resultado es una base de líneas en una capa (`LINEAS_DETECTADAS`) que un
-  dibujante debe revisar y completar: cotas, textos, símbolos eléctricos,
-  achurados, etc. no se generan solos.
-- La fidelidad depende directamente de la calidad del escaneo: líneas finas,
-  manchas o escaneos torcidos producen más ruido y segmentos de más que hay
-  que limpiar a mano en AutoCAD.
+- **Modo `fiel` (por defecto):** separa la tinta del papel y **calca cada
+  trazo como vectores** (polilíneas en la capa `TRAZO_ORIGINAL`). En
+  AutoCAD el plano se ve igual que el PDF: ejes, textos, símbolos, curvas.
+- **Lo que NO es:** no son objetos CAD "inteligentes". Un muro no es un muro
+  editable, un texto no es un `TEXT` que se pueda corregir y cada trazo es el
+  *contorno* de la línea original (se ve como una línea gruesa, pero son dos
+  trazos muy juntos). Sirve para ver, medir y como **base para que un
+  dibujante redibuje o limpie**; no reemplaza el redibujado.
+- Modo `lineas` (`--modo lineas`): detecta solo líneas rectas. Es más
+  limpio pero muy incompleto (sin textos ni símbolos); en pruebas con planos
+  reales se ve como "rayas sueltas", por eso ya no es el modo por defecto.
+- **Si el plano sale de lado, usa `--rotar 90`** o arrastra los PDF sobre
+  `convertir_girado_90.bat`. Sale girado tal cual venga el escaneo.
+- La fidelidad depende de la calidad del escaneo: textos muy pequeños o
+  borrosos salen como manchas. Escanea a 300-400 DPI en blanco y negro o gris.
 - **No genera un archivo `.dwg` binario por sí sola.** Ninguna librería libre
   de Python puede escribir `.dwg` (es un formato propietario de Autodesk). Lo
   que el script genera de forma nativa es **DXF**, que AutoCAD abre
-  exactamente igual que un DWG (`Archivo > Abrir`, sin pasos extra). Si
-  necesitas el archivo con extensión `.dwg` literal, instala el conversor
-  gratuito **ODA File Converter** (ver [sección dedicada](#convertir-a-dwg-real-opcional))
-  y el script lo usará automáticamente.
-- Si ya tienes el **DWG original** del plano o un dibujante que te lo pueda
-  redibujar a mano con buena calidad, eso siempre dará mejor resultado que
-  una conversión automática desde un escaneo.
+  exactamente igual que un DWG (`Archivo > Abrir`). Si necesitas el archivo
+  con extensión `.dwg` literal, instala el conversor gratuito **ODA File
+  Converter** (ver [sección dedicada](#convertir-a-dwg-real-opcional)) y el
+  script lo usará automáticamente.
+- Si ya tienes el **DWG original** del plano, eso siempre dará mejor
+  resultado que cualquier conversión desde un escaneo.
 
 ## Requisitos del sistema
 
@@ -98,6 +103,8 @@ una ventana para que selecciones la carpeta donde están tus planos PDF.
 python main.py "C:\Planos\Edificio A\planta1.pdf"
 python main.py "C:\Planos\Edificio A"          # convierte todos los PDF de la carpeta
 python main.py planta1.pdf --dpi 400            # usar más resolución
+python main.py planta1.pdf --rotar 90           # el escaneo está de lado
+python main.py planta1.pdf --modo lineas        # solo líneas rectas (modo alterno)
 python main.py planta1.pdf --no-dwg             # generar solo .dxf, sin intentar .dwg
 python main.py planta1.pdf --verbose            # ver más detalle en consola/log
 ```
@@ -152,13 +159,15 @@ entrega solo archivos `.dxf`, que AutoCAD abre sin ningún problema adicional.
 planos2dwg/
 ├── main.py                 # Punto de entrada (CLI + selector de carpeta)
 ├── convertir.bat           # Arrastra tus PDF aquí
+├── convertir_girado_90.bat # Igual, para escaneos que salen de lado
 ├── instalar.bat            # Instalador de un clic
 ├── requirements.txt        # Dependencias de producción
 ├── requirements-dev.txt    # Dependencias + pytest para desarrollo
 ├── setup.py                # Instalación opcional vía pip (pip install -e .)
 ├── src/
 │   ├── pdf_processor.py    # PDF -> imágenes (PyMuPDF)
-│   ├── line_detector.py    # Imagen -> segmentos de línea (OpenCV)
+│   ├── vectorizer.py       # Imagen -> calcado fiel de la tinta (OpenCV)
+│   ├── line_detector.py    # Modo alterno: imagen -> líneas rectas
 │   ├── dxf_writer.py       # Segmentos -> archivo DXF (ezdxf)
 │   ├── dwg_converter.py    # DXF -> DWG real (ODA File Converter, opcional)
 │   ├── converter.py        # Orquesta el pipeline completo
@@ -171,7 +180,10 @@ planos2dwg/
 
 - Pensado para planos **en blanco y negro o escala de grises**; planos a
   color con fondos o tramas complejas generan más ruido.
-- No reconoce texto, cotas, símbolos ni bloques; solo geometría lineal.
+- No reconoce texto, cotas, símbolos ni bloques como objetos CAD: los calca
+  como dibujo (se ven, pero no se pueden editar como texto o bloque).
+- Si abres un `.dxf` mientras lo vuelves a convertir, el nuevo se guarda con
+  la hora en el nombre (Windows no deja sobrescribir un archivo abierto).
 - Escaneos torcidos (sin enderezar) o de baja resolución (menos de ~200 DPI)
   producen resultados pobres; se recomienda escanear a 300–400 DPI.
 - El `.dwg` real requiere instalar ODA File Converter por separado (no se

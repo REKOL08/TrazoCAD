@@ -15,10 +15,12 @@ from pathlib import Path
 import ezdxf
 
 from .line_detector import Segment
+from .vectorizer import Polyline
 
 logger = logging.getLogger("planos2dwg")
 
 LAYER_LINES = "LINEAS_DETECTADAS"
+LAYER_TRACE = "TRAZO_ORIGINAL"
 MM_PER_INCH = 25.4
 
 
@@ -31,27 +33,44 @@ def build_dxf(
     dpi: int,
     image_height_px: int,
     output_path: Path,
+    polylines: list[Polyline] | None = None,
 ) -> Path:
-    """Escribe `segments` (en píxeles) como entidades LINE en un DXF nuevo.
+    """Escribe `segments` y `polylines` (en píxeles) en un DXF nuevo.
 
-    El eje Y se invierte porque en la imagen crece hacia abajo y en DXF/CAD
-    crece hacia arriba. Las unidades del documento quedan en milímetros.
+    Los segmentos van como entidades LINE en la capa LINEAS_DETECTADAS y
+    las polilíneas como LWPOLYLINE cerradas en TRAZO_ORIGINAL. El eje Y se
+    invierte porque en la imagen crece hacia abajo y en DXF/CAD crece hacia
+    arriba. Las unidades del documento quedan en milímetros.
     """
+    polylines = polylines or []
+
     document = ezdxf.new(dxfversion="R2010", units=ezdxf.units.MM)
     document.header["$INSUNITS"] = ezdxf.units.MM
 
     layers = document.layers
     if LAYER_LINES not in layers:
         layers.add(name=LAYER_LINES, color=7)
+    if LAYER_TRACE not in layers:
+        layers.add(name=LAYER_TRACE, color=7)
 
     modelspace = document.modelspace()
 
+    def to_mm(x: float, y: float) -> tuple[float, float]:
+        return (_px_to_mm(x, dpi), _px_to_mm(image_height_px - y, dpi))
+
     for (x1, y1), (x2, y2) in segments:
-        start = (_px_to_mm(x1, dpi), _px_to_mm(image_height_px - y1, dpi))
-        end = (_px_to_mm(x2, dpi), _px_to_mm(image_height_px - y2, dpi))
-        modelspace.add_line(start, end, dxfattribs={"layer": LAYER_LINES})
+        modelspace.add_line(to_mm(x1, y1), to_mm(x2, y2), dxfattribs={"layer": LAYER_LINES})
+
+    for polyline in polylines:
+        modelspace.add_lwpolyline(
+            [to_mm(x, y) for x, y in polyline],
+            close=True,
+            dxfattribs={"layer": LAYER_TRACE},
+        )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     document.saveas(output_path)
-    logger.info("DXF generado: %s (%d líneas)", output_path, len(segments))
+    logger.info(
+        "DXF generado: %s (%d líneas, %d polilíneas)", output_path, len(segments), len(polylines)
+    )
     return output_path

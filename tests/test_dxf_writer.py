@@ -31,3 +31,17 @@ def test_build_dxf_sin_segmentos_crea_dxf_vacio(tmp_path: Path) -> None:
 
     documento = ezdxf.readfile(salida)
     assert list(documento.modelspace().query("LINE")) == []
+
+
+def test_build_dxf_escribe_polilineas_cerradas_en_capa_de_trazo(tmp_path: Path) -> None:
+    from src.dxf_writer import LAYER_TRACE
+
+    polilineas = [[(0.0, 0.0), (100.0, 0.0), (100.0, 50.0)]]
+    salida = tmp_path / "trazo.dxf"
+
+    build_dxf([], dpi=300, image_height_px=1000, output_path=salida, polylines=polilineas)
+
+    entidades = list(ezdxf.readfile(salida).modelspace().query("LWPOLYLINE"))
+    assert len(entidades) == 1
+    assert entidades[0].closed
+    assert entidades[0].dxf.layer == LAYER_TRACE

@@ -30,7 +30,13 @@ for _stream in (sys.stdout, sys.stderr):
         except (ValueError, OSError):
             pass
 
-from src.converter import DEFAULT_MIN_LENGTH_MM, convert_pdf  # noqa: E402
+from src.converter import (  # noqa: E402
+    DEFAULT_MIN_LENGTH_MM,
+    MODE_LINES,
+    MODE_TRACE,
+    VALID_ROTATIONS,
+    convert_pdf,
+)
 from src.utils import (  # noqa: E402
     DEFAULT_DPI,
     MAX_DPI,
@@ -83,13 +89,29 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=f"Resolución de escaneo a usar, entre {MIN_DPI} y {MAX_DPI} (por defecto {DEFAULT_DPI}).",
     )
     parser.add_argument(
+        "--modo",
+        choices=(MODE_TRACE, MODE_LINES),
+        default=MODE_TRACE,
+        help=(
+            "'fiel' (por defecto) calca la tinta del escaneo y se ve igual que el PDF; "
+            "'lineas' detecta solo líneas rectas (resultado más limpio pero muy incompleto)."
+        ),
+    )
+    parser.add_argument(
+        "--rotar",
+        type=int,
+        choices=VALID_ROTATIONS,
+        default=0,
+        help="Gira el plano en sentido antihorario (0, 90, 180 o 270) si el escaneo está de lado.",
+    )
+    parser.add_argument(
         "--min-length",
         type=float,
         default=DEFAULT_MIN_LENGTH_MM,
         dest="min_length_mm",
         help=(
             "Longitud mínima en milímetros (sobre el plano final) para conservar un "
-            f"segmento detectado; descarta ruido de texto/cotas/achurado (por defecto {DEFAULT_MIN_LENGTH_MM})."
+            f"segmento detectado; solo aplica al modo 'lineas' (por defecto {DEFAULT_MIN_LENGTH_MM})."
         ),
     )
     parser.add_argument(
@@ -141,6 +163,8 @@ def main(argv: list[str] | None = None) -> int:
             dpi=args.dpi,
             generate_dwg=not args.no_dwg,
             min_length_mm=args.min_length_mm,
+            mode=args.modo,
+            rotation=args.rotar,
         )
         if result.success:
             successes += 1
