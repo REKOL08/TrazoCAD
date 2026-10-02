@@ -131,3 +131,19 @@ def test_build_dxf_escribe_puertas_y_ventanas_en_sus_capas(tmp_path: Path) -> No
     lineas = {e.dxf.layer for e in modelspace.query("LINE")}
     assert [a.dxf.layer for a in arcos] == [LAYER_DOORS]
     assert lineas == {LAYER_DOORS, LAYER_WINDOWS}
+
+
+def test_las_cifras_de_cota_van_en_su_capa(tmp_path: Path) -> None:
+    import numpy as np
+
+    from src.dxf_writer import LAYER_DIMENSIONS, LAYER_TEXT
+    from src.texto import TextItem
+
+    caja = np.array([[100.0, 100.0], [200.0, 100.0], [200.0, 130.0], [100.0, 130.0]])
+    textos = [TextItem("2.05", 0.9, caja), TextItem("COCINA", 0.9, caja + 400)]
+    salida = tmp_path / "cotas.dxf"
+
+    build_dxf([], dpi=300, image_height_px=1000, output_path=salida, texts=textos)
+
+    capas = {e.dxf.text: e.dxf.layer for e in ezdxf.readfile(salida).modelspace().query("TEXT")}
+    assert capas == {"2.05": LAYER_DIMENSIONS, "COCINA": LAYER_TEXT}

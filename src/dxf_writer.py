@@ -10,6 +10,7 @@ nativa igual que un .dwg; la conversión opcional a .dwg real se hace en
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 import ezdxf
@@ -32,10 +33,19 @@ LAYER_ARCS = "ARCOS"
 LAYER_DOORS = "PUERTAS"
 LAYER_WINDOWS = "VENTANAS"
 TEXT_STYLE = "PLANOS"
+LAYER_DIMENSIONS = "COTAS"
+_DIMENSION_NUMBER = re.compile(r"^\d{1,2}[.,]\d{2}$")
 LAYER_TEXT = "TEXTOS"
 LAYER_TEXT_REVIEW = "TEXTOS_REVISAR"
 _TEXT_HEIGHT_FACTOR = 0.78
 MM_PER_INCH = 25.4
+
+
+def _text_layer(item: TextItem) -> str:
+    """Las cifras de cota (2.05, 0.90...) van aparte de los nombres de los espacios."""
+    if item.sure and _DIMENSION_NUMBER.match(item.text):
+        return LAYER_DIMENSIONS
+    return LAYER_TEXT if item.sure else LAYER_TEXT_REVIEW
 
 
 def _px_to_mm(value_px: float, dpi: int) -> float:
@@ -84,6 +94,8 @@ def build_dxf(
         layers.add(name=LAYER_TRACE, color=8, lineweight=13)
     if LAYER_WALLS not in layers:
         layers.add(name=LAYER_WALLS, color=7, lineweight=50)
+    if LAYER_DIMENSIONS not in layers:
+        layers.add(name=LAYER_DIMENSIONS, color=3)
     if LAYER_TEXT not in layers:
         layers.add(name=LAYER_TEXT, color=5)
     if LAYER_TEXT_REVIEW not in layers:
@@ -142,7 +154,7 @@ def build_dxf(
             item.text,
             height=_px_to_mm(item.height_px, dpi) * _TEXT_HEIGHT_FACTOR,
             dxfattribs={
-                "layer": LAYER_TEXT if item.sure else LAYER_TEXT_REVIEW,
+                "layer": _text_layer(item),
                 "style": TEXT_STYLE,
             },
         )

@@ -27,6 +27,25 @@ class PageImage:
     page_number: int
     image: np.ndarray  # imagen en escala de grises, forma (alto, ancho)
     dpi: int
+    native_dpi: float | None = None  # resolución real del escaneo incrustado (None si es vectorial)
+
+
+def _native_dpi(document: "fitz.Document", page: "fitz.Page") -> float | None:
+    """Resolución real de la imagen más grande incrustada en la página.
+
+    Renderizar a más dpi que esto solo interpola: no añade detalle. Un escaneo
+    de 150 dpi tiene los textos pequeños (cotas) demasiado borrosos para leerlos.
+    """
+    best = 0.0
+    for image in page.get_images(full=True):
+        try:
+            info = document.extract_image(image[0])
+        except Exception:  # imagen que no se puede extraer: se ignora
+            continue
+        width_in = page.rect.width / 72.0
+        if width_in > 0:
+            best = max(best, info["width"] / width_in)
+    return best or None
 
 
 def render_pdf_pages(pdf_path: Path, dpi: int) -> list[PageImage]:
@@ -61,7 +80,14 @@ def render_pdf_pages(pdf_path: Path, dpi: int) -> list[PageImage]:
             image = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(
                 pixmap.height, pixmap.width
             )
-            pages.append(PageImage(page_number=index + 1, image=image.copy(), dpi=dpi))
+            pages.append(
+                PageImage(
+                    page_number=index + 1,
+                    image=image.copy(),
+                    dpi=dpi,
+                    native_dpi=_native_dpi(document, page),
+                )
+            )
             logger.debug(
                 "Página %d de %s rasterizada a %dx%d px (%d DPI)",
                 index + 1,

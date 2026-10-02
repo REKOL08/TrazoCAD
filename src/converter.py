@@ -131,6 +131,19 @@ def _save_dxf(path: Path, **geometry) -> Path:
     return path
 
 
+LOW_RESOLUTION_DPI = 250
+
+
+def _warn_if_low_resolution(pdf_name: str, native_dpi: float | None) -> None:
+    if native_dpi is not None and native_dpi < LOW_RESOLUTION_DPI:
+        logger.warning(
+            "'%s': el escaneo del PDF tiene solo %d dpi reales. Los textos pequeños y las cotas "
+            "no se podrán leer bien; para un buen resultado escanea a 300-400 dpi.",
+            pdf_name,
+            round(native_dpi),
+        )
+
+
 def _timestamp() -> str:
     """Marca de tiempo para el nombre del archivo: cada conversión es un archivo nuevo."""
     return datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -170,6 +183,7 @@ def convert_pdf(
 
         outputs: list[Path] = []
         for page in pages:
+            _warn_if_low_resolution(pdf_path.name, page.native_dpi)
             image = deskew(rotate_image(page.image, rotation), page.dpi)
             segments: list = []
             polylines: list = []

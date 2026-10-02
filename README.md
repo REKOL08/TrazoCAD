@@ -18,10 +18,11 @@ Cada conversión entrega **dos archivos**: `..._limpio.dxf` (solo lo reconstruid
 | `ARCOS` | Arcos y círculos reales (`ARC`/`CIRCLE`): muros curvos, puertas batientes, escaleras circulares | Buena en curvas grandes; puede haber algún arco falso o faltar uno |
 | `EJES` | Ejes de trazo y punto (tipo de línea `CENTER`): la cuadrícula de letras y números y algunos radiales | Buena en la cuadrícula; puede faltar algún eje radial y no toma como eje las líneas de corte continuas |
 | `TEXTOS` | Los nombres de espacios y las cifras leídos con OCR, como **texto de AutoCAD editable** (se pueden corregir con doble clic), en azul | Buena en nombres (SALON SOCIAL, COCINA, ACCESO...); se corrigen confusiones típicas con un vocabulario de planos (BARO -> BAÑO) |
+| `COTAS` | Solo las **cifras** de las cotas (2.05, 0.90...) que el OCR leyó con seguridad, en verde, separadas de los nombres de los espacios | **Incompleta**: con un escaneo de 150 dpi se leen pocas cifras. No se generan cotas de AutoCAD (`DIMENSION`), solo el texto |
 | `TEXTOS_REVISAR` | Lecturas dudosas (poca confianza, no reconocidas en el vocabulario) en naranja | Hay que revisarlas a mano; su dibujo original sigue en `CALCADO_REFERENCIA` para comparar |
 | `CALCADO_REFERENCIA` | Calco fiel de toda la tinta del escaneo (textos, símbolos, cotas, curvas) como polilíneas, con las líneas largas suavizadas y enderezadas | Se ve como el PDF; es una **referencia para calcar encima**, apágala (`LAYER OFF`) para ver solo lo limpio |
 
-- **No son objetos CAD "inteligentes"**: no hay cotas ni muebles como bloques,
+- **No son objetos CAD "inteligentes"**: no hay cotas (`DIMENSION`) ni muebles como bloques,
   y las puertas y ventanas son solo geometría (no bloques con sus atributos), y los muros no tienen relleno ni espesor como objeto.
   Los textos sí son `TEXT` editable si instalaste el OCR (ver abajo); sin él
   quedan solo como calco.
@@ -230,6 +231,12 @@ planos2dwg/
   unir planos de varias hojas en un solo dibujo.
 
 ## Solución de problemas
+
+- **"el escaneo del PDF tiene solo N dpi reales"**: el PDF contiene una imagen de
+  poca resolución (por ejemplo, una hoja carta a 150 dpi). Convertir a más dpi
+  solo interpola y no añade detalle: los textos pequeños y las cifras de las
+  cotas miden unos 7 píxeles y no se pueden leer, y los trazos salen irregulares.
+  **El factor que más mejora el resultado es escanear a 300-400 dpi.**
 
 - **"No se encontró Python"**: reinstala Python marcando "Add to PATH", o usa
   `instalar.bat`, que valida esto automáticamente.
