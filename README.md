@@ -12,7 +12,7 @@ minutos y la use así:
 
 ## ⚠️ Qué hace y qué NO hace esta herramienta (leer antes de usar)
 
-Cada plano se entrega como **un solo archivo** (`nombre-del-pdf.dwg`) con estas **capas**. Lo reconstruido va en capas propias, con líneas rectas y de un solo trazo (sin el temblor del escaneo) y una jerarquía de grosores de línea (muros 0,35 mm, detalle 0,09 mm...). El calco del escaneo va **dentro del mismo archivo pero apagado**. El archivo se abre ya centrado en el dibujo:
+Cada plano se entrega como **un solo archivo** (`nombre-del-pdf.dwg`) con estas **capas**. Lo reconstruido va en capas propias, con líneas rectas y de un solo trazo (sin el temblor del escaneo) y una jerarquía de grosores de línea (muros 0,35 mm, detalle 0,09 mm...). El **escaneo completo va dentro del mismo archivo como relleno sólido gris**, de fondo, para que el plano se lea con todo su detalle (burbujas de ejes, escaleras, mobiliario, símbolos...); encima van las capas reconstruidas en colores. El archivo se abre ya centrado en el dibujo:
 
 | Capa | Qué contiene | Calidad |
 |---|---|---|
@@ -26,7 +26,7 @@ Cada plano se entrega como **un solo archivo** (`nombre-del-pdf.dwg`) con estas 
 | `COTAS` | Solo las **cifras** de las cotas (2.05, 0.90...) que el OCR leyó con seguridad, en verde, separadas de los nombres de los espacios | **Incompleta**: con un escaneo de 150 dpi se leen pocas cifras. No se generan cotas de AutoCAD (`DIMENSION`), solo el texto |
 | `TEXTOS_REVISAR` | Lecturas dudosas (poca confianza, no reconocidas en el vocabulario) en naranja | Hay que revisarlas a mano; su dibujo original sigue en `CALCADO_REFERENCIA` para comparar |
 | `DETALLE` | Lo que no es muro, eje, arco, puerta ni texto (cotas, contornos de muebles, rayados) rehecho como **líneas rectas limpias**: se funden los dos bordes de cada trazo, se unen los tramos colineales y se enderezan a horizontal/vertical | Limpia pero **incompleta y fragmentada**: solo tramos rectos de más de 2 mm; las curvas pequeñas, los símbolos y las letras que el OCR no leyó no aparecen aquí (están en el calco apagado) |
-| `CALCADO_REFERENCIA` | Calco fiel de toda la tinta del escaneo (textos, símbolos, cotas, curvas) como polilíneas, con las líneas largas suavizadas y enderezadas | Se ve como el PDF pero con los trazos irregulares del escaneo. Va **apagada**: enciéndela (administrador de capas, o `--calco-visible` al convertir) para comparar o para calcar encima lo que falte |
+| `CALCADO_REFERENCIA` | La tinta del escaneo como **relleno sólido gris** (una mancha por trazo, con sus agujeros: una "O" lleva su hueco), sin lo que ya está dibujado limpio en otra capa ni las letras leídas con seguridad | Reproduce todo el detalle del plano tal como se ve en el escaneo, pero con los bordes irregulares del JPEG. Es la base de lectura; no es geometría editable. Apágala (administrador de capas, o `--calco-apagado` al convertir) para ver solo lo reconstruido |
 
 - **No son objetos CAD "inteligentes"**: no hay cotas (`DIMENSION`) ni muebles como bloques (solo sanitarios como elipses),
   y las puertas y ventanas son solo geometría (no bloques con sus atributos), y los muros no tienen relleno ni espesor como objeto.
@@ -139,8 +139,8 @@ python main.py planta1.pdf --rotar 90           # forzar el giro (por defecto se
 python main.py planta1.pdf --ignorar-inferior 0.17  # forzar el cajetín (por defecto se detecta solo)
 python main.py planta1.pdf --conservar-dxf      # guardar también el .dxf junto al .dwg
 python main.py planta1.pdf --sin-texto          # no leer textos (más rápido, ~30 s menos)
-python main.py planta1.pdf --calco-visible      # dejar encendida la capa del calco de referencia
-python main.py planta1.pdf --solo-limpio        # sin calco: archivo más pequeño, sin la capa de referencia
+python main.py planta1.pdf --calco-apagado      # dejar apagado el relleno gris del escaneo (solo lo reconstruido)
+python main.py planta1.pdf --solo-limpio        # sin el relleno del escaneo en el archivo (más pequeño)
 python main.py planta1.pdf --grosor-muro 1.0    # espesor de muro en mm sobre el papel (si no, se mide solo)
 python main.py planta1.pdf --modo lineas        # solo líneas rectas (modo alterno)
 python main.py planta1.pdf --no-dwg             # entregar .dxf en vez de .dwg
