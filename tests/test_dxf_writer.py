@@ -179,19 +179,35 @@ def test_la_vista_inicial_se_centra_en_lo_reconstruido_y_no_en_el_ruido_lejano(t
     assert vport.dxf.height < 60  # encuadre ajustado al dibujo, no a toda la extensión
 
 
-def test_el_calco_va_en_el_archivo_pero_apagado_por_defecto(tmp_path: Path) -> None:
+def test_el_calco_va_visible_por_defecto_y_se_puede_apagar(tmp_path: Path) -> None:
     from src.dxf_writer import LAYER_TRACE
 
-    poligono = [[(0.0, 0.0), (100.0, 0.0), (100.0, 50.0)]]
+    mancha = [[(0.0, 0.0), (100.0, 0.0), (100.0, 50.0)]]
+    visible = tmp_path / "visible.dxf"
     apagado = tmp_path / "apagado.dxf"
-    encendido = tmp_path / "encendido.dxf"
 
-    build_dxf([], dpi=300, image_height_px=1000, output_path=apagado, polylines=poligono)
-    build_dxf([], dpi=300, image_height_px=1000, output_path=encendido, polylines=poligono, trace_visible=True)
+    build_dxf([], dpi=300, image_height_px=1000, output_path=visible, shapes=[mancha])
+    build_dxf([], dpi=300, image_height_px=1000, output_path=apagado, shapes=[mancha], trace_visible=False)
 
+    assert not ezdxf.readfile(visible).layers.get(LAYER_TRACE).is_off()
     assert ezdxf.readfile(apagado).layers.get(LAYER_TRACE).is_off()
-    assert not ezdxf.readfile(encendido).layers.get(LAYER_TRACE).is_off()
-    assert len(list(ezdxf.readfile(apagado).modelspace().query("LWPOLYLINE"))) == 1  # sigue ahí
+    assert len(list(ezdxf.readfile(apagado).modelspace().query("HATCH"))) == 1  # sigue ahí
+
+
+def test_el_escaneo_se_dibuja_como_relleno_sin_perder_los_agujeros(tmp_path: Path) -> None:
+    from src.dxf_writer import LAYER_TRACE
+
+    exterior = [(0.0, 0.0), (300.0, 0.0), (300.0, 300.0), (0.0, 300.0)]
+    agujero = [(100.0, 100.0), (200.0, 100.0), (200.0, 200.0), (100.0, 200.0)]  # como una letra "O"
+    salida = tmp_path / "relleno.dxf"
+
+    build_dxf([], dpi=300, image_height_px=1000, output_path=salida, shapes=[[exterior, agujero]])
+
+    rellenos = list(ezdxf.readfile(salida).modelspace().query("HATCH"))
+    assert len(rellenos) == 1
+    assert rellenos[0].dxf.layer == LAYER_TRACE
+    assert rellenos[0].dxf.solid_fill == 1
+    assert len(rellenos[0].paths) == 2  # contorno exterior + agujero
 
 
 def test_las_lineas_de_detalle_van_en_su_capa(tmp_path: Path) -> None:

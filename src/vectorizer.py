@@ -54,8 +54,15 @@ def binarize_ink(image: np.ndarray, dpi: int) -> np.ndarray:
     return ink
 
 
-def trace_ink(image: np.ndarray, dpi: int) -> list[Polyline]:
-    """Calca la tinta de `image` como polilíneas cerradas en píxeles."""
+Shape = list[Polyline]  # [contorno exterior, hueco, hueco...]: una mancha de tinta con sus agujeros
+
+
+def trace_shapes(image: np.ndarray, dpi: int) -> list[Shape]:
+    """Calca la tinta de `image` como manchas (contorno exterior + agujeros) en píxeles.
+
+    Cada mancha se puede rellenar como un sólido (una letra "O" lleva su agujero), lo que se
+    ve como la tinta impresa y no como un doble contorno irregular.
+    """
     sharp = binarize_ink(image, dpi)
     scale = dpi / _REFERENCE_DPI
 
@@ -71,29 +78,51 @@ def trace_ink(image: np.ndarray, dpi: int) -> list[Polyline]:
     small_mask = is_small[labels].astype(np.uint8) * 255
     near_small = cv2.dilate(small_mask, np.ones((5, 5), np.uint8))
     ink = np.where(small_mask > 0, sharp, np.where(near_small > 0, 0, smooth)).astype(np.uint8)
-    contours, _ = cv2.findContours(ink, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+    contours, hierarchy = cv2.findContours(ink, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+    if hierarchy is None:
+        return []
 
     min_area = _MIN_SPECK_AREA_PX_AT_REF_DPI * scale * scale
     min_points = _MIN_SPECK_POINTS_AT_REF_DPI * scale
     epsilon = _SIMPLIFY_EPSILON_PX_AT_REF_DPI * scale
     fine_epsilon = 0.6 * scale
+    snap_min = _SNAP_MIN_SEGMENT_MM * dpi / 25.4
 
-    polylines: list[Polyline] = []
-    for contour in contours:
-        if cv2.contourArea(contour) < min_area and len(contour) < min_points:
-            continue
+    def simplify(contour: np.ndarray) -> Polyline | None:
         _x, _y, box_w, box_h = cv2.boundingRect(contour)
         small = max(box_w, box_h) <= small_limit
         simplified = cv2.approxPolyDP(contour, fine_epsilon if small else epsilon, True)
         if len(simplified) < 3:
-            continue
+            return None
         points = [(float(x), float(y)) for x, y in simplified[:, 0, :]]
-        if not small:
-            points = _snap_orthogonal(points, _SNAP_MIN_SEGMENT_MM * dpi / 25.4)
-        polylines.append(points)
+        return points if small else _snap_orthogonal(points, snap_min)
 
-    logger.info("Calcado de tinta: %d contornos -> %d polilíneas.", len(contours), len(polylines))
-    return polylines
+    shapes: list[Shape] = []
+    for index, contour in enumerate(contours):
+        if hierarchy[0][index][3] >= 0:  # los agujeros se recogen desde su contorno exterior
+            continue
+        if cv2.contourArea(contour) < min_area and len(contour) < min_points:
+            continue
+        outer = simplify(contour)
+        if outer is None:
+            continue
+        shape: Shape = [outer]
+        child = hierarchy[0][index][2]
+        while child >= 0:
+            if cv2.contourArea(contours[child]) >= min_area:
+                hole = simplify(contours[child])
+                if hole is not None:
+                    shape.append(hole)
+            child = hierarchy[0][child][0]
+        shapes.append(shape)
+
+    logger.info("Calcado de tinta: %d manchas.", len(shapes))
+    return shapes
+
+
+def trace_ink(image: np.ndarray, dpi: int) -> list[Polyline]:
+    """Calca la tinta como polilíneas cerradas sueltas (contornos exteriores y agujeros)."""
+    return [polyline for shape in trace_shapes(image, dpi) for polyline in shape]
 
 
 def _snap_orthogonal(points: Polyline, min_length_px: float) -> Polyline:

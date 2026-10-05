@@ -27,7 +27,7 @@ from .vectorizer import binarize_ink
 from .pdf_processor import render_pdf_pages
 from .texto import TextItem, read_texts
 from .utils import ConversionError, validate_pdf
-from .vectorizer import trace_ink
+from .vectorizer import trace_shapes
 
 logger = logging.getLogger("planos2dwg")
 
@@ -37,20 +37,21 @@ MODE_LINES = "lineas"
 VALID_ROTATIONS = (0, 90, 180, 270)
 
 
-def _without_read_letters(polylines: list, texts: list[TextItem]) -> list:
+def _without_read_letters(shapes: list, texts: list[TextItem]) -> list:
     """Quita del calco las letras que el OCR leyó con seguridad (ya son texto editable).
 
     Las lecturas dudosas se dejan en el calco para poder comparar y corregir.
     """
     sure = [t for t in texts if t.sure]
     if not sure:
-        return polylines
+        return shapes
     kept = []
-    for polyline in polylines:
-        cx = sum(p[0] for p in polyline) / len(polyline)
-        cy = sum(p[1] for p in polyline) / len(polyline)
+    for shape in shapes:
+        outer = shape[0]
+        cx = sum(p[0] for p in outer) / len(outer)
+        cy = sum(p[1] for p in outer) / len(outer)
         if not any(t.contains(cx, cy) for t in sure):
-            kept.append(polyline)
+            kept.append(shape)
     return kept
 
 
@@ -91,7 +92,7 @@ def _without_door_arcs(arcs: list, doors: list, tol_px: float) -> list:
     ]
 
 
-def _without_explained(polylines: list, clean_segments: list, tol_px: float, share: float = 0.85) -> list:
+def _without_explained(shapes: list, clean_segments: list, tol_px: float, share: float = 0.85) -> list:
     """Quita del calco los contornos que ya están representados por líneas limpias.
 
     El calco de un muro o de un eje es el contorno fino alrededor de la línea
@@ -99,20 +100,20 @@ def _without_explained(polylines: list, clean_segments: list, tol_px: float, sha
     ensucia el dibujo. Se descarta el contorno cuyos vértices están (en su
     gran mayoría) pegados a alguna línea limpia.
     """
-    if not clean_segments or not polylines:
-        return polylines
+    if not clean_segments or not shapes:
+        return shapes
     starts = np.array([a for a, _b in clean_segments], dtype=np.float64)
     ends = np.array([b for _a, b in clean_segments], dtype=np.float64)
     along = ends - starts
     squared = np.maximum((along**2).sum(axis=1), 1e-9)
     kept = []
-    for polyline in polylines:
-        points = np.array(polyline, dtype=np.float64)
+    for shape in shapes:
+        points = np.array(shape[0], dtype=np.float64)
         t = np.clip(((points[:, None, :] - starts[None]) * along[None]).sum(axis=2) / squared, 0.0, 1.0)
         nearest = starts[None] + t[..., None] * along[None]
         distance = np.hypot(*(points[:, None, :] - nearest).transpose(2, 0, 1)).min(axis=1)
         if (distance <= tol_px).mean() < share:
-            kept.append(polyline)
+            kept.append(shape)
     return kept
 
 
@@ -189,7 +190,7 @@ def convert_pdf(
     wall_thickness_mm: float | None = None,
     read_text: bool = True,
     keep_dxf: bool = False,
-    trace_visible: bool = False,
+    trace_visible: bool = True,
 ) -> ConversionResult:
     """Convierte un único PDF en un archivo de AutoCAD por página (.dwg, o .dxf sin ODA).
 
@@ -213,6 +214,7 @@ def convert_pdf(
             bottom = detect_title_block_fraction(image, page.dpi) if ignore_bottom_fraction is None else ignore_bottom_fraction
             segments: list = []
             polylines: list = []
+            shapes: list = []
             walls: list = []
             axes: list = []
             arcs: list = []
@@ -252,14 +254,14 @@ def convert_pdf(
                 )
                 detail = detect_detail_lines(image, page.dpi, explained, texts, ignore_bottom_fraction=bottom)
                 if not clean_only:
-                    polylines = _without_read_letters(trace_ink(image, dpi=page.dpi), texts)
-                    before = len(polylines)
-                    polylines = _without_explained(polylines, explained, tol_px=0.45 * page.dpi / 25.4)
+                    shapes = _without_read_letters(trace_shapes(image, dpi=page.dpi), texts)
+                    before = len(shapes)
+                    shapes = _without_explained(shapes, explained, tol_px=0.45 * page.dpi / 25.4)
                     logger.info(
                         "Calco: %d contornos ya explicados por muros, ejes y arcos se quitan.",
-                        before - len(polylines),
+                        before - len(shapes),
                     )
-            if not any((segments, polylines, walls, axes, arcs, texts, doors, windows, fixtures, detail)):
+            if not any((segments, shapes, walls, axes, arcs, texts, doors, windows, fixtures, detail)):
                 logger.warning(
                     "'%s' página %d: no se detectó geometría; se omite esta página.",
                     pdf_path.name,
@@ -275,7 +277,7 @@ def convert_pdf(
                     dpi=page.dpi,
                     image_height_px=image.shape[0],
                     output_path=dxf_path,
-                    polylines=polylines,
+                    shapes=shapes,
                     walls=walls,
                     axes=axes,
                     arcs=arcs,

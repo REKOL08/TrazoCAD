@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 
 import ezdxf
-from ezdxf import bbox, zoom
+from ezdxf import bbox, const, zoom
 from ezdxf.enums import TextEntityAlignment
 
 from .arcos import Arc
@@ -24,7 +24,7 @@ from .muebles import Fixture
 from .puertas import Door
 from .texto import TextItem
 from .ventanas import Window
-from .vectorizer import Polyline
+from .vectorizer import Polyline, Shape
 
 logger = logging.getLogger("planos2dwg")
 
@@ -118,7 +118,8 @@ def build_dxf(
     windows: list[Window] | None = None,
     fixtures: list[Fixture] | None = None,
     detail: list[Segment] | None = None,
-    trace_visible: bool = False,
+    trace_visible: bool = True,
+    shapes: list[Shape] | None = None,
 ) -> Path:
     """Escribe `segments` y `polylines` (en píxeles) en un DXF nuevo.
 
@@ -136,6 +137,7 @@ def build_dxf(
     windows = windows or []
     fixtures = fixtures or []
     detail = detail or []
+    shapes = shapes or []
 
     document = ezdxf.new(dxfversion="R2010", setup=True, units=ezdxf.units.MM)
     document.header["$INSUNITS"] = ezdxf.units.MM
@@ -174,6 +176,19 @@ def build_dxf(
 
     def to_mm(x: float, y: float) -> tuple[float, float]:
         return (_px_to_mm(x, dpi), _px_to_mm(image_height_px - y, dpi))
+
+    # el escaneo como relleno sólido gris (se ve como la tinta impresa); va primero para que
+    # las capas reconstruidas se dibujen encima
+    for shape in shapes:
+        hatch = modelspace.add_hatch(color=8, dxfattribs={"layer": LAYER_TRACE})
+        hatch.set_solid_fill(color=8)
+        hatch.paths.add_polyline_path(
+            [to_mm(px, py) for px, py in shape[0]], is_closed=True, flags=const.BOUNDARY_PATH_EXTERNAL
+        )
+        for hole in shape[1:]:
+            hatch.paths.add_polyline_path(
+                [to_mm(px, py) for px, py in hole], is_closed=True, flags=const.BOUNDARY_PATH_OUTERMOST
+            )
 
     for (x1, y1), (x2, y2) in segments:
         modelspace.add_line(to_mm(x1, y1), to_mm(x2, y2), dxfattribs={"layer": LAYER_LINES})
@@ -248,7 +263,7 @@ def build_dxf(
         )
 
     if not trace_visible and LAYER_TRACE in layers:
-        # el calco queda en el archivo pero apagado: se ve lo limpio; se enciende para comparar
+        # con trace_visible=False el calco queda en el archivo pero apagado
         layers.get(LAYER_TRACE).off()
 
     _zoom_to_drawing(modelspace)
@@ -266,6 +281,6 @@ def build_dxf(
         len(windows),
         len(fixtures),
         len(texts),
-        len(polylines),
+        len(polylines) + len(shapes),
     )
     return output_path

@@ -133,9 +133,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Guardar también el .dxf junto al .dwg (por defecto se entrega un solo archivo por plano).",
     )
     parser.add_argument(
-        "--calco-visible",
+        "--calco-apagado",
         action="store_true",
-        help="Dejar encendida la capa CALCADO_REFERENCIA (por defecto va en el archivo pero apagada).",
+        help="Dejar apagada la capa CALCADO_REFERENCIA (por defecto va visible, como relleno gris del escaneo).",
     )
     parser.add_argument(
         "--solo-limpio",
@@ -208,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
             wall_thickness_mm=args.grosor_muro,
             read_text=not args.sin_texto,
             keep_dxf=args.conservar_dxf,
-            trace_visible=args.calco_visible,
+            trace_visible=not args.calco_apagado,
         )
         if result.success:
             successes += 1
