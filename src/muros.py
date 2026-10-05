@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import math
+import weakref
 
 import cv2
 import numpy as np
@@ -54,8 +55,24 @@ def _odd(value: float) -> int:
     return number if number % 2 == 1 else number + 1
 
 
+_LSD_CACHE: dict = {"image": None, "dpi": None, "result": None}
+
+
 def _lsd_segments(image: np.ndarray, dpi: int) -> np.ndarray:
-    """Segmentos (n, 4) = x1, y1, x2, y2 detectados sobre la imagen sin fondo."""
+    """Segmentos (n, 4) = x1, y1, x2, y2 detectados sobre la imagen sin fondo.
+
+    Muros, ejes, arcos y detalle parten de la misma imagen: el resultado se guarda
+    para no repetir el cálculo (se invalida si la imagen es otro objeto).
+    """
+    cached = _LSD_CACHE["image"]
+    if cached is not None and cached() is image and _LSD_CACHE["dpi"] == dpi:
+        return _LSD_CACHE["result"].copy()
+    result = _compute_lsd_segments(image, dpi)
+    _LSD_CACHE.update(image=weakref.ref(image), dpi=dpi, result=result)
+    return result.copy()
+
+
+def _compute_lsd_segments(image: np.ndarray, dpi: int) -> np.ndarray:
     scale = dpi / _REFERENCE_DPI
     background = cv2.medianBlur(image, _odd(_BACKGROUND_KERNEL_AT_REF_DPI * scale))
     normalized = cv2.divide(image, background, scale=255)

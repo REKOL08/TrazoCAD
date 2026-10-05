@@ -15,6 +15,7 @@ import numpy as np
 
 from .dwg_converter import convert_dxf_to_dwg
 from .deskew import deskew
+from .detalle import detect_detail_lines
 from .dxf_writer import build_dxf
 from .line_detector import detect_lines, filter_short_segments, merge_collinear_segments
 from .muebles import detect_fixtures
@@ -188,6 +189,7 @@ def convert_pdf(
     wall_thickness_mm: float | None = None,
     read_text: bool = True,
     keep_dxf: bool = False,
+    trace_visible: bool = False,
 ) -> ConversionResult:
     """Convierte un único PDF en un archivo de AutoCAD por página (.dwg, o .dxf sin ODA).
 
@@ -218,6 +220,7 @@ def convert_pdf(
             doors: list = []
             windows: list = []
             fixtures: list = []
+            detail: list = []
             if mode == MODE_LINES:
                 segments = detect_lines(image)
                 segments = merge_collinear_segments(segments, dpi=page.dpi)
@@ -239,21 +242,24 @@ def convert_pdf(
                 if read_text:
                     texts = read_texts(image, ignore_bottom_fraction=bottom)
                 fixtures = detect_fixtures(image, page.dpi, texts, wall_thickness_px=thickness)
+                explained = (
+                    list(walls)
+                    + list(axes)
+                    + _arc_segments(arcs)
+                    + _door_segments(doors)
+                    + [line for window in windows for line in window.lines]
+                    + [seg for f in fixtures for seg in zip(f.outline(), f.outline()[1:])]
+                )
+                detail = detect_detail_lines(image, page.dpi, explained, texts, ignore_bottom_fraction=bottom)
                 if not clean_only:
                     polylines = _without_read_letters(trace_ink(image, dpi=page.dpi), texts)
                     before = len(polylines)
-                    polylines = _without_explained(
-                        polylines,
-                        list(walls) + list(axes) + _arc_segments(arcs) + _door_segments(doors)
-                        + [line for window in windows for line in window.lines]
-                        + [seg for f in fixtures for seg in zip(f.outline(), f.outline()[1:])],
-                        tol_px=0.45 * page.dpi / 25.4,
-                    )
+                    polylines = _without_explained(polylines, explained, tol_px=0.45 * page.dpi / 25.4)
                     logger.info(
                         "Calco: %d contornos ya explicados por muros, ejes y arcos se quitan.",
                         before - len(polylines),
                     )
-            if not any((segments, polylines, walls, axes, arcs, texts, doors, windows, fixtures)):
+            if not any((segments, polylines, walls, axes, arcs, texts, doors, windows, fixtures, detail)):
                 logger.warning(
                     "'%s' página %d: no se detectó geometría; se omite esta página.",
                     pdf_path.name,
@@ -277,11 +283,13 @@ def convert_pdf(
                     doors=doors,
                     windows=windows,
                     fixtures=fixtures,
+                    detail=detail,
+                    trace_visible=trace_visible,
                 )
                 outputs.extend(_deliver(dxf_path, output_dir, generate_dwg, keep_dxf))
             for key, items in (
                 ("muros", walls), ("ejes", axes), ("arcos", arcs), ("puertas", doors),
-                ("ventanas", windows), ("sanitarios", fixtures), ("textos", texts),
+                ("ventanas", windows), ("sanitarios", fixtures), ("textos", texts), ("lineas de detalle", detail),
             ):
                 summary[key] = summary.get(key, 0) + len(items)
 

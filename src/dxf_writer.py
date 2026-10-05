@@ -34,6 +34,7 @@ LAYER_WALLS = "MUROS"
 LAYER_AXES = "EJES"
 LAYER_ARCS = "ARCOS"
 LAYER_DOORS = "PUERTAS"
+LAYER_DETAIL = "DETALLE"
 LAYER_FIXTURES = "SANITARIOS"
 LAYER_WINDOWS = "VENTANAS"
 TEXT_STYLE = "PLANOS"
@@ -42,11 +43,12 @@ _DIMENSION_NUMBER = re.compile(r"^\d{1,2}[.,]\d{2}$")
 LAYER_TEXT = "TEXTOS"
 LAYER_TEXT_REVIEW = "TEXTOS_REVISAR"
 _TEXT_HEIGHT_FACTOR = 0.78
+_HEIGHT_GROUP_RATIO = 1.25  # alturas que difieren menos de esto se tratan como el mismo tamaño de letra
 MM_PER_INCH = 25.4
 
 
 _CLEAN_LAYERS = frozenset(
-    {"MUROS", "EJES", "ARCOS", "PUERTAS", "VENTANAS", "SANITARIOS", "TEXTOS", "TEXTOS_REVISAR", "COTAS"}
+    {"MUROS", "EJES", "ARCOS", "PUERTAS", "VENTANAS", "SANITARIOS", "TEXTOS", "TEXTOS_REVISAR", "COTAS", "DETALLE"}
 )
 
 
@@ -62,6 +64,33 @@ def _zoom_to_drawing(modelspace) -> None:
         zoom.center(modelspace, box.center, (size.x * 1.08, size.y * 1.08))
     else:
         zoom.extents(modelspace)
+
+
+def _grouped_heights(heights: list[float]) -> list[float]:
+    """Unifica las alturas parecidas: un plano profesional usa pocos tamaños de letra.
+
+    Se ordenan las alturas medidas y se agrupan las que difieren poco; cada grupo usa
+    la mediana (a 0.1 mm), de modo que dos letras casi iguales nunca quedan en tamaños
+    distintos por caer a lados de una frontera.
+    """
+    order = sorted(range(len(heights)), key=lambda i: heights[i])
+    result = [0.0] * len(heights)
+    group: list[int] = []
+
+    def close(members: list[int]) -> None:
+        values = sorted(heights[i] for i in members)
+        value = round(values[len(values) // 2], 1) or values[len(values) // 2]
+        for i in members:
+            result[i] = value
+
+    for index in order:
+        if group and heights[index] > _HEIGHT_GROUP_RATIO * heights[group[0]]:
+            close(group)
+            group = []
+        group.append(index)
+    if group:
+        close(group)
+    return result
 
 
 def _text_layer(item: TextItem) -> str:
@@ -88,6 +117,8 @@ def build_dxf(
     doors: list[Door] | None = None,
     windows: list[Window] | None = None,
     fixtures: list[Fixture] | None = None,
+    detail: list[Segment] | None = None,
+    trace_visible: bool = False,
 ) -> Path:
     """Escribe `segments` y `polylines` (en píxeles) en un DXF nuevo.
 
@@ -104,6 +135,7 @@ def build_dxf(
     doors = doors or []
     windows = windows or []
     fixtures = fixtures or []
+    detail = detail or []
 
     document = ezdxf.new(dxfversion="R2010", setup=True, units=ezdxf.units.MM)
     document.header["$INSUNITS"] = ezdxf.units.MM
@@ -118,13 +150,15 @@ def build_dxf(
     if LAYER_TRACE not in layers:
         layers.add(name=LAYER_TRACE, color=8, lineweight=13)
     if LAYER_WALLS not in layers:
-        layers.add(name=LAYER_WALLS, color=7, lineweight=50)
+        layers.add(name=LAYER_WALLS, color=7, lineweight=35)
     if LAYER_DIMENSIONS not in layers:
         layers.add(name=LAYER_DIMENSIONS, color=3)
     if LAYER_TEXT not in layers:
         layers.add(name=LAYER_TEXT, color=5)
     if LAYER_TEXT_REVIEW not in layers:
         layers.add(name=LAYER_TEXT_REVIEW, color=30)
+    if LAYER_DETAIL not in layers:
+        layers.add(name=LAYER_DETAIL, color=8, lineweight=9)
     if LAYER_FIXTURES not in layers:
         layers.add(name=LAYER_FIXTURES, color=6, lineweight=18)
     if LAYER_WINDOWS not in layers:
@@ -134,7 +168,7 @@ def build_dxf(
     if LAYER_ARCS not in layers:
         layers.add(name=LAYER_ARCS, color=7, lineweight=25)
     if LAYER_AXES not in layers:
-        layers.add(name=LAYER_AXES, color=1, linetype="CENTER", lineweight=18)
+        layers.add(name=LAYER_AXES, color=1, linetype="CENTER", lineweight=13)
 
     modelspace = document.modelspace()
 
@@ -159,6 +193,9 @@ def build_dxf(
             modelspace.add_arc(
                 centre, radius, arc.start_deg, arc.end_deg, dxfattribs={"layer": LAYER_ARCS}
             )
+
+    for (x1, y1), (x2, y2) in detail:
+        modelspace.add_line(to_mm(x1, y1), to_mm(x2, y2), dxfattribs={"layer": LAYER_DETAIL})
 
     for fixture in fixtures:
         theta = math.radians(fixture.angle_deg)
@@ -188,10 +225,11 @@ def build_dxf(
             (hx, hy), (tx, ty) = door.leaf
             modelspace.add_line(to_mm(hx, hy), to_mm(tx, ty), dxfattribs={"layer": LAYER_DOORS})
 
-    for item in texts:
+    text_heights = _grouped_heights([_px_to_mm(item.height_px, dpi) * _TEXT_HEIGHT_FACTOR for item in texts])
+    for item, height in zip(texts, text_heights):
         entity = modelspace.add_text(
             item.text,
-            height=_px_to_mm(item.height_px, dpi) * _TEXT_HEIGHT_FACTOR,
+            height=height,
             dxfattribs={
                 "layer": _text_layer(item),
                 "style": TEXT_STYLE,
@@ -208,6 +246,10 @@ def build_dxf(
             close=True,
             dxfattribs={"layer": LAYER_TRACE},
         )
+
+    if not trace_visible and LAYER_TRACE in layers:
+        # el calco queda en el archivo pero apagado: se ve lo limpio; se enciende para comparar
+        layers.get(LAYER_TRACE).off()
 
     _zoom_to_drawing(modelspace)
 

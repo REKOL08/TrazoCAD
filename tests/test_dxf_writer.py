@@ -88,8 +88,8 @@ def test_las_capas_llevan_grosor_de_linea(tmp_path: Path) -> None:
     build_dxf([], dpi=300, image_height_px=1000, output_path=salida)
 
     documento = ezdxf.readfile(salida)
-    assert documento.layers.get(LAYER_WALLS).dxf.lineweight == 50
-    assert documento.layers.get(LAYER_AXES).dxf.lineweight == 18
+    assert documento.layers.get(LAYER_WALLS).dxf.lineweight == 35
+    assert documento.layers.get(LAYER_AXES).dxf.lineweight == 13
     assert documento.header["$LWDISPLAY"] == 1
 
 
@@ -177,3 +177,48 @@ def test_la_vista_inicial_se_centra_en_lo_reconstruido_y_no_en_el_ruido_lejano(t
     # los muros están en x = 1000-1600 px (84-135 mm); el ruido en 10 px (~1 mm)
     assert 90 < centro_x < 130
     assert vport.dxf.height < 60  # encuadre ajustado al dibujo, no a toda la extensión
+
+
+def test_el_calco_va_en_el_archivo_pero_apagado_por_defecto(tmp_path: Path) -> None:
+    from src.dxf_writer import LAYER_TRACE
+
+    poligono = [[(0.0, 0.0), (100.0, 0.0), (100.0, 50.0)]]
+    apagado = tmp_path / "apagado.dxf"
+    encendido = tmp_path / "encendido.dxf"
+
+    build_dxf([], dpi=300, image_height_px=1000, output_path=apagado, polylines=poligono)
+    build_dxf([], dpi=300, image_height_px=1000, output_path=encendido, polylines=poligono, trace_visible=True)
+
+    assert ezdxf.readfile(apagado).layers.get(LAYER_TRACE).is_off()
+    assert not ezdxf.readfile(encendido).layers.get(LAYER_TRACE).is_off()
+    assert len(list(ezdxf.readfile(apagado).modelspace().query("LWPOLYLINE"))) == 1  # sigue ahí
+
+
+def test_las_lineas_de_detalle_van_en_su_capa(tmp_path: Path) -> None:
+    from src.dxf_writer import LAYER_DETAIL
+
+    salida = tmp_path / "detalle.dxf"
+
+    build_dxf([], dpi=300, image_height_px=1000, output_path=salida, detail=[((0.0, 0.0), (200.0, 0.0))])
+
+    lineas = list(ezdxf.readfile(salida).modelspace().query("LINE"))
+    assert [linea.dxf.layer for linea in lineas] == [LAYER_DETAIL]
+
+
+def test_las_alturas_de_texto_parecidas_se_unifican(tmp_path: Path) -> None:
+    import numpy as np
+
+    from src.texto import TextItem
+
+    def caja(alto_px: float) -> np.ndarray:
+        return np.array([[0.0, 0.0], [200.0, 0.0], [200.0, alto_px], [0.0, alto_px]])
+
+    # tres cajas de 17, 18 y 19 px (mismo tamaño de letra visto con ruido) y una de 42 px
+    textos = [TextItem(f"SALA{k}", 0.9, caja(alto) + 300 * k) for k, alto in enumerate((17.0, 18.0, 19.0, 42.0))]
+    salida = tmp_path / "alturas.dxf"
+
+    build_dxf([], dpi=300, image_height_px=1000, output_path=salida, texts=textos)
+
+    alturas = {e.dxf.text: e.dxf.height for e in ezdxf.readfile(salida).modelspace().query("TEXT")}
+    assert len({alturas["SALA0"], alturas["SALA1"], alturas["SALA2"]}) == 1
+    assert alturas["SALA3"] > 2 * alturas["SALA0"] * 0.9
