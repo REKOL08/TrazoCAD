@@ -161,7 +161,7 @@ def build_dxf(
     if LAYER_TEXT_REVIEW not in layers:
         layers.add(name=LAYER_TEXT_REVIEW, color=30)
     if LAYER_DETAIL not in layers:
-        layers.add(name=LAYER_DETAIL, color=8, lineweight=9)
+        layers.add(name=LAYER_DETAIL, color=7, lineweight=13)
     if LAYER_FIXTURES not in layers:
         layers.add(name=LAYER_FIXTURES, color=6, lineweight=18)
     if LAYER_WINDOWS not in layers:

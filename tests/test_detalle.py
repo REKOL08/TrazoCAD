@@ -67,3 +67,23 @@ def test_la_franja_del_cajetin_se_ignora() -> None:
     image = _imagen(lambda im: cv2.line(im, (100, 650), (500, 650), 0, 5))
 
     assert detect_detail_strokes(image, DPI, explained=[], texts=[], ignore_bottom_fraction=0.15) == []
+
+
+def test_las_rayas_cortas_de_una_linea_discontinua_se_conservan() -> None:
+    def rayas(im: np.ndarray) -> None:
+        for k in range(8):  # 8 rayas de ~0.6 mm (7 px) separadas ~1.7 mm, en una fila
+            x = 100 + 27 * k
+            cv2.line(im, (x, 300), (x + 7, 300), 0, 3)
+
+    image = _imagen(rayas)
+
+    trazos = detect_detail_strokes(image, DPI, explained=[], texts=[])
+
+    assert len(trazos) >= 6  # no se tiran como si fueran motas
+    assert all(len(t.points) == 2 for t in trazos)
+
+
+def test_una_mota_aislada_sigue_siendo_ruido() -> None:
+    image = _imagen(lambda im: cv2.line(im, (300, 300), (307, 300), 0, 3))
+
+    assert detect_detail_strokes(image, DPI, explained=[], texts=[]) == []

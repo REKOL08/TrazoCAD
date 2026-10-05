@@ -31,6 +31,11 @@ _SIMPLIFY_MM = 0.14
 _SNAP_MIN_MM = 3.0
 _SNAP_ANGLE_DEG = 1.5
 _MIN_COMPONENT_MM = 0.9
+_DASH_MIN_MM = 0.3
+_DASH_MAX_MM = 2.5
+_DASH_ELONGATION = 2.0
+_DASH_NEIGHBOUR_MM = 3.0
+_DASH_MIN_NEIGHBOURS = 2
 _JOIN_TOLERANCE_MM = 0.25
 _JOIN_MIN_COSINE = math.cos(math.radians(35))
 
@@ -142,11 +147,51 @@ def detect_detail_strokes(
     if ignore_bottom_fraction > 0:
         ink[int(image.shape[0] * (1 - ignore_bottom_fraction)) :, :] = 0
 
-    # cerrar huecos de 1 px y quitar las motas (manchas más cortas que ~1 mm)
+    # cerrar huecos de 1 px y quitar las motas (manchas más cortas que ~1 mm); las rayas cortas
+    # de una línea discontinua se conservan aparte: una mota suelta es ruido, pero varias
+    # manchas cortas seguidas son los trazos de una línea de trazos o de trazo y punto
     ink = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
-    count, labels, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    count, labels, stats, centroids = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    length = np.maximum(stats[:, cv2.CC_STAT_WIDTH], stats[:, cv2.CC_STAT_HEIGHT])
+
+    # candidatas a raya de línea discontinua: manchas cortas Y alargadas (una "O" o una mota no lo son)
+    dash_info: dict[int, tuple[float, float, float, float, float, float]] = {}
+    for component in np.nonzero(
+        (length >= _DASH_MIN_MM * px_per_mm)
+        & (length <= _DASH_MAX_MM * px_per_mm)
+        & (stats[:, cv2.CC_STAT_AREA] >= 4)
+    )[0]:
+        if component == 0:
+            continue
+        ys, xs = np.nonzero(labels == component)
+        points = np.column_stack([xs, ys]).astype(np.float64)
+        centre = points.mean(axis=0)
+        eigenvalues, eigenvectors = np.linalg.eigh(np.cov((points - centre).T) + 1e-9 * np.eye(2))
+        if np.sqrt(eigenvalues[1] / max(eigenvalues[0], 1e-9)) < _DASH_ELONGATION:
+            continue
+        direction = eigenvectors[:, 1]
+        along = (points - centre) @ direction
+        dash_info[int(component)] = (centre[0], centre[1], direction[0], direction[1], along.min(), along.max())
+
+    # una raya suelta es ruido; varias seguidas son los trazos de una línea discontinua
+    dashes: list[Stroke] = []
+    ids = list(dash_info)
+    if len(ids) > _DASH_MIN_NEIGHBOURS:
+        centres = np.array([[dash_info[i][0], dash_info[i][1]] for i in ids])
+        reach = _DASH_NEIGHBOUR_MM * px_per_mm
+        dash_mask = np.zeros(count, dtype=bool)
+        for k, component in enumerate(ids):
+            if (np.hypot(*(centres - centres[k]).T) <= reach).sum() - 1 < _DASH_MIN_NEIGHBOURS:
+                continue
+            cx, cy, vx, vy, low, high = dash_info[component]
+            dashes.append(Stroke([(float(cx + vx * low), float(cy + vy * low)), (float(cx + vx * high), float(cy + vy * high))]))
+            dash_mask[component] = True
+        ink[dash_mask[labels]] = 0
+        count, labels, stats, centroids = cv2.connectedComponentsWithStats(ink, connectivity=8)
+        length = np.maximum(stats[:, cv2.CC_STAT_WIDTH], stats[:, cv2.CC_STAT_HEIGHT])
+
     keep = np.zeros(count, dtype=bool)
-    keep[1:] = np.maximum(stats[1:, cv2.CC_STAT_WIDTH], stats[1:, cv2.CC_STAT_HEIGHT]) >= _MIN_COMPONENT_MM * px_per_mm
+    keep[1:] = length[1:] >= _MIN_COMPONENT_MM * px_per_mm
     ink = np.where(keep[labels], 255, 0).astype(np.uint8)
 
     skeleton = skeletonize(ink)
@@ -170,7 +215,7 @@ def detect_detail_strokes(
     straight = [s for s in simplified if not s.closed and len(s.points) == 2]
     others = [s for s in simplified if s.closed or len(s.points) != 2]
     merged = merge_collinear_segments([(s.points[0], s.points[1]) for s in straight], dpi=dpi)
-    result = others + [Stroke([a, b]) for a, b in merged]
+    result = others + [Stroke([a, b]) for a, b in merged] + dashes
 
-    logger.info("Detalle: %d trazos de un solo trazo (%d rectos).", len(result), len(merged))
+    logger.info("Detalle: %d trazos de un solo trazo (%d rectos, %d rayas de líneas discontinuas).", len(result), len(merged), len(dashes))
     return result

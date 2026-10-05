@@ -25,7 +25,7 @@ Cada plano se entrega como **un solo archivo** (`nombre-del-pdf.dwg`) con estas 
 | `TEXTOS` | Los nombres de espacios y las cifras leídos con OCR, como **texto de AutoCAD editable** (se pueden corregir con doble clic), en azul | Buena en nombres (SALON SOCIAL, COCINA, ACCESO...); se corrigen confusiones típicas con un vocabulario de planos (BARO -> BAÑO) |
 | `COTAS` | Solo las **cifras** de las cotas (2.05, 0.90...) que el OCR leyó con seguridad, en verde, separadas de los nombres de los espacios | **Incompleta**: con un escaneo de 150 dpi se leen pocas cifras. No se generan cotas de AutoCAD (`DIMENSION`), solo el texto |
 | `TEXTOS_REVISAR` | Lecturas dudosas (poca confianza, no reconocidas en el vocabulario) en naranja | Hay que revisarlas a mano; su dibujo original sigue en `CALCADO_REFERENCIA` para comparar |
-| `DETALLE` | Todo lo que no es muro, eje, arco, puerta, ventana, sanitario ni texto leído (escaleras, contornos de mobiliario, cotas, curvas, rayados): se borra de la tinta lo ya reconstruido, lo que queda se **adelgaza a su línea central**, se recorre como grafo, se simplifica (0,14 mm), se endereza a horizontal/vertical y se unen los tramos continuos. Rectas como `LINE`, curvas como polilíneas | Recoge casi todo el detalle como **líneas finas de un solo trazo**, pero con la resolución de un escaneo de 150 dpi algunas líneas salen con pequeños quiebres, las curvas son polilíneas (no arcos exactos) y las letras que el OCR no leyó pueden aparecer como trazos sueltos |
+| `DETALLE` | Todo lo que no es muro, eje, arco, puerta, ventana, sanitario ni texto leído (escaleras, contornos de mobiliario, cotas, curvas, rayados): se borra de la tinta lo ya reconstruido, lo que queda se **adelgaza a su línea central**, se recorre como grafo, se simplifica (0,14 mm), se endereza a horizontal/vertical y se unen los tramos continuos. Las **rayas cortas de las líneas discontinuas** (trazos, trazo y punto) se conservan como rayas sueltas. Rectas como `LINE`, curvas como polilíneas. En blanco y con grosor fino (0,13 mm) | Recoge casi todo el detalle como **líneas finas de un solo trazo**, pero con la resolución de un escaneo de 150 dpi algunas líneas salen con pequeños quiebres, las curvas son polilíneas (no arcos exactos) y las letras que el OCR no leyó pueden aparecer como trazos sueltos |
 | `CALCADO_REFERENCIA` | La tinta del escaneo como **relleno sólido gris** (una mancha por trazo, con sus agujeros). Va **apagada** | Solo para comparar con el escaneo original; hereda los bordes irregulares del JPEG. Se enciende desde el administrador de capas o con `--calco-visible` al convertir |
 
 - **No son objetos CAD "inteligentes"**: no hay cotas (`DIMENSION`) ni muebles como bloques (solo sanitarios como elipses),
@@ -193,6 +193,13 @@ Un PDF de varias páginas genera un archivo por página, con el sufijo `_p1`,
 
 Si no instalas ODA File Converter, el script sigue funcionando normalmente y
 entrega el plano como `.dxf`, que AutoCAD abre sin ningún problema adicional.
+
+## Planos de prueba
+
+La carpeta `planos_de_prueba/` es para dejar los planos con los que quieres afinar el programa
+(escaneos a 300-400 dpi, planos distintos entre sí, y si existe el DWG original o un conteo hecho
+a mano). **Su contenido no se sube a GitHub** (solo el `LEEME.txt`), porque los planos pueden ser
+confidenciales. Detalles en `planos_de_prueba/LEEME.txt`.
 
 ## Estructura del proyecto
 

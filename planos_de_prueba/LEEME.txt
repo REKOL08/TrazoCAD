@@ -1,0 +1,23 @@
+PLANOS DE PRUEBA
+================
+
+Deja aqui los planos con los que quieres que se afine el programa. Esta carpeta NO se sube a
+GitHub (los planos pueden ser confidenciales); solo este LEEME.
+
+Que conviene poner (de mas a menos util):
+  1. Escaneos a 300-400 dpi, en blanco y negro o gris, en PDF. Un escaneo de 150 dpi limita
+     mucho el resultado; una foto de celular sin enderezar ni iluminar parejo es peor.
+  2. Planos DISTINTOS entre si: de lado, con el cajetin en otra posicion, de otra escala, de
+     otro tipo (arquitectonico, electrico...). Asi no se ajusta solo a un plano.
+  3. Si existe, el DWG o DXF original del mismo plano, con el mismo nombre y el sufijo
+     _original. Ejemplo:  planta1.pdf  +  planta1_original.dwg
+     Con eso se puede medir objetivamente cuanto se parece lo convertido al original.
+  4. Un archivo de texto con lo que tu cuentas a mano, con el mismo nombre y el sufijo
+     _conteo.txt. Ejemplo (planta1_conteo.txt):
+         puertas: 10
+         ventanas: 6
+         banos: 4
+
+Nombres sin espacios ni tildes si es posible (planta1.pdf, no "Planta Nivel 1.pdf").
+
+Cuando haya planos aqui, se convierten todos y se compara el resultado plano por plano.
