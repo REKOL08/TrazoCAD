@@ -30,3 +30,9 @@ htmlcov/
 .idea/
 Thumbs.db
 .DS_Store
+
+# Resultados de las conversiones y archivos de bloqueo de AutoCAD (nunca se versionan)
+Convertidos_DWG/
+*.dwl
+*.dwl2
+*.bak
