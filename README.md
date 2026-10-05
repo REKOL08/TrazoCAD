@@ -174,8 +174,10 @@ sufijo `_p1`, `_p2`, etc. (por ejemplo `planta-primer-piso_p2.dxf`).
 
 1. Descarga **ODA File Converter** gratis desde el sitio oficial de la Open
    Design Alliance: https://www.opendesign.com/guestfiles/oda_file_converter
-2. Instálalo con las opciones por defecto. En Windows también puedes instalarlo con
-   una sola línea desde una terminal: `winget install ODA.ODAFileConverter`.
+2. Instálalo con las opciones por defecto (archivo `.msi`, unos 32 MB). Verifica que el
+   instalador esté firmado por *OPEN DESIGN ALLIANCE* (clic derecho > Propiedades >
+   Firmas digitales). No uses `winget install ODA.ODAFileConverter`: a octubre de 2026 el
+   paquete de winget apunta a un enlace que da error 404.
 3. Vuelve a ejecutar `convertir.bat` normalmente: el script detecta la
    instalación automáticamente y, además del `.dxf`, dejará un `.dwg`.
 
