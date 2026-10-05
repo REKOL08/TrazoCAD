@@ -1,55 +1,69 @@
 import cv2
 import numpy as np
 
-from src.detalle import detect_detail_lines
-from src.muros import _lsd_segments
+from src.detalle import detect_detail_strokes
 from src.texto import TextItem
 
 DPI = 300
 
 
-def _imagen_con_linea(x1=100, x2=400, y=300, grosor=3) -> np.ndarray:
-    image = np.full((600, 800), 255, dtype=np.uint8)
-    cv2.line(image, (x1, y), (x2, y), 0, grosor)
+def _imagen(dibujar) -> np.ndarray:
+    image = np.full((700, 900), 255, dtype=np.uint8)
+    dibujar(image)
     return image
 
 
-def test_una_linea_fina_sale_como_un_solo_trazo_recto() -> None:
-    lineas = detect_detail_lines(_imagen_con_linea(), DPI, explained=[], texts=[])
+def test_una_linea_gruesa_sale_como_un_solo_trazo_recto() -> None:
+    image = _imagen(lambda im: cv2.line(im, (100, 300), (500, 300), 0, 5))  # 5 px de grosor
 
-    assert len(lineas) == 1
-    (x1, y1), (x2, y2) = lineas[0]
-    assert abs(y1 - y2) < 1e-6  # enderezada a horizontal exacta
-    assert abs(abs(x2 - x1) - 300) < 12
+    trazos = detect_detail_strokes(image, DPI, explained=[], texts=[])
 
-
-def test_lo_que_ya_esta_dibujado_en_otra_capa_no_se_repite() -> None:
-    muro = [((100.0, 300.0), (400.0, 300.0))]
-
-    assert detect_detail_lines(_imagen_con_linea(), DPI, explained=muro, texts=[]) == []
+    assert len(trazos) == 1
+    assert len(trazos[0].points) == 2  # una sola recta, no un contorno doble
+    (x1, y1), (x2, y2) = trazos[0].points
+    assert abs(y1 - 300) < 3 and abs(y1 - y2) < 1e-6  # centrada y enderezada
+    assert abs(abs(x2 - x1) - 400) < 20
 
 
-def test_los_trazos_cortos_se_descartan_como_ruido() -> None:
-    corta = _imagen_con_linea(x1=100, x2=118)  # 18 px = 1.5 mm, menos que el mínimo
+def test_una_curva_queda_completa_en_pocos_trazos_con_su_longitud() -> None:
+    import math
 
-    assert detect_detail_lines(corta, DPI, explained=[], texts=[]) == []
+    image = _imagen(lambda im: cv2.ellipse(im, (450, 350), (150, 100), 0, 200, 340, 0, 4))
+
+    trazos = detect_detail_strokes(image, DPI, explained=[], texts=[])
+
+    # longitud real del arco de elipse dibujado (~ 140 grados), por integración numérica
+    angulos = np.radians(np.linspace(200, 340, 400))
+    esperado = sum(
+        math.hypot(150 * (math.cos(b) - math.cos(a)), 100 * (math.sin(b) - math.sin(a)))
+        for a, b in zip(angulos, angulos[1:])
+    )
+    total = sum(math.dist(s.points[i], s.points[i + 1]) for s in trazos for i in range(len(s.points) - 1))
+    assert len(trazos) <= 6  # el esqueleto deja algún nudo, pero no se desmenuza en decenas
+    assert 0.9 * esperado < total < 1.25 * esperado
 
 
-def test_lo_que_cae_sobre_un_texto_leido_no_es_detalle() -> None:
-    caja = np.array([[90.0, 270.0], [420.0, 270.0], [420.0, 330.0], [90.0, 330.0]])
-    texto = TextItem("COCINA", 0.9, caja, sure=True)
+def test_lo_que_ya_esta_en_otra_capa_se_borra() -> None:
+    image = _imagen(lambda im: cv2.line(im, (100, 300), (500, 300), 0, 5))
+    muro = [((100.0, 300.0), (500.0, 300.0))]
 
-    assert detect_detail_lines(_imagen_con_linea(), DPI, explained=[], texts=[texto]) == []
+    assert detect_detail_strokes(image, DPI, explained=muro, texts=[]) == []
 
 
-def test_la_cache_de_segmentos_no_mezcla_imagenes_distintas() -> None:
-    una = _imagen_con_linea(y=200)
-    otra = _imagen_con_linea(y=400)
+def test_las_motas_pequenas_no_son_trazos() -> None:
+    image = _imagen(lambda im: cv2.circle(im, (300, 300), 3, 0, -1))  # mota de ~0.5 mm
 
-    primero = _lsd_segments(una, DPI)
-    segundo = _lsd_segments(otra, DPI)
-    primero[:] = 0  # modificar la copia no debe alterar la caché
-    de_nuevo = _lsd_segments(una, DPI)
+    assert detect_detail_strokes(image, DPI, explained=[], texts=[]) == []
 
-    assert abs(segundo[:, 1].mean() - 400) < 6
-    assert abs(de_nuevo[:, 1].mean() - 200) < 6
+
+def test_las_letras_leidas_con_seguridad_se_borran() -> None:
+    image = _imagen(lambda im: cv2.line(im, (100, 300), (500, 300), 0, 5))
+    caja = np.array([[80.0, 270.0], [520.0, 270.0], [520.0, 330.0], [80.0, 330.0]])
+
+    assert detect_detail_strokes(image, DPI, explained=[], texts=[TextItem("COCINA", 0.9, caja, sure=True)]) == []
+
+
+def test_la_franja_del_cajetin_se_ignora() -> None:
+    image = _imagen(lambda im: cv2.line(im, (100, 650), (500, 650), 0, 5))
+
+    assert detect_detail_strokes(image, DPI, explained=[], texts=[], ignore_bottom_fraction=0.15) == []

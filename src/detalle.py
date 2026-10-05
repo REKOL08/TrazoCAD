@@ -1,11 +1,11 @@
-"""Líneas de detalle limpias: lo que no es muro, eje, arco, puerta ni texto.
+"""Trazos de detalle de un solo trazo: todo lo que no es muro, eje, arco, puerta ni texto.
 
-El calco de la tinta hereda cada irregularidad del escaneo (se ve "tembloroso").
-Aquí lo que queda del dibujo —cotas, contornos de muebles, rayados— se rehace como
-líneas rectas de un solo trazo: se funden los dos bordes de cada trazo en una línea
-central, se unen los tramos colineales, se enderezan a horizontal/vertical y se
-descartan las que ya están representadas por muros, ejes, arcos, puertas, ventanas,
-sanitarios o textos.
+Lo que no se reconstruye con un detector específico (cotas, contornos de mobiliario y
+sanitarios, escaleras, rayados, curvas pequeñas) se rehace como **líneas de un solo trazo**:
+se borra de la tinta lo ya dibujado en otra capa y las letras leídas, lo que queda se
+adelgaza a su línea central (esqueleto), se recorre como un grafo, se simplifica y se
+endereza. El resultado son polilíneas finas y rectas donde el escaneo era recto, no el
+doble contorno irregular de un relleno.
 """
 
 from __future__ import annotations
@@ -13,69 +13,164 @@ from __future__ import annotations
 import logging
 import math
 
+import cv2
 import numpy as np
 
+from .centerline import Stroke, skeletonize, trace_skeleton
 from .line_detector import Segment, merge_collinear_segments
-from .muros import _lsd_segments, _merge_stroke_edges, _snap_axis_aligned
 from .texto import TextItem
+from .vectorizer import binarize_ink
 
 logger = logging.getLogger("planos2dwg")
 
 _MM_PER_INCH = 25.4
-_MIN_LENGTH_MM = 2.2
-_EXPLAINED_TOL_MM = 0.45
-_SHARE_EXPLAINED = 0.80
+_ERASE_BAND_PX_AT_300 = 9
+_MIN_STROKE_LENGTH_MM = 0.9
+_SPUR_MM = 0.8
+_SIMPLIFY_MM = 0.14
+_SNAP_MIN_MM = 3.0
+_SNAP_ANGLE_DEG = 1.5
+_MIN_COMPONENT_MM = 0.9
+_JOIN_TOLERANCE_MM = 0.25
+_JOIN_MIN_COSINE = math.cos(math.radians(35))
 
 
-def _distance_to_segments(points: np.ndarray, starts: np.ndarray, ends: np.ndarray) -> np.ndarray:
-    """Distancia mínima de cada punto a cualquiera de los segmentos."""
-    along = ends - starts
-    squared = np.maximum((along**2).sum(axis=1), 1e-9)
-    t = np.clip(((points[:, None, :] - starts[None]) * along[None]).sum(axis=2) / squared, 0.0, 1.0)
-    nearest = starts[None] + t[..., None] * along[None]
-    return np.hypot(*(points[:, None, :] - nearest).transpose(2, 0, 1)).min(axis=1)
+def _snap_orthogonal(points: list[tuple[float, float]], min_length_px: float) -> list[tuple[float, float]]:
+    """Endereza a H/V exactos los tramos largos casi horizontales o verticales."""
+    pts = [list(p) for p in points]
+    tolerance = math.tan(math.radians(_SNAP_ANGLE_DEG))
+    for i in range(len(pts) - 1):
+        (x1, y1), (x2, y2) = pts[i], pts[i + 1]
+        dx, dy = x2 - x1, y2 - y1
+        if math.hypot(dx, dy) < min_length_px:
+            continue
+        if abs(dy) <= tolerance * abs(dx):
+            pts[i][1] = pts[i + 1][1] = (y1 + y2) / 2
+        elif abs(dx) <= tolerance * abs(dy):
+            pts[i][0] = pts[i + 1][0] = (x1 + x2) / 2
+    return [(p[0], p[1]) for p in pts]
 
 
-def detect_detail_lines(
+def _join_strokes(strokes: list[Stroke], tolerance_px: float) -> list[Stroke]:
+    """Une los trazos cuyos extremos se tocan y siguen en la misma dirección.
+
+    El esqueleto deja nudos falsos que parten una misma curva en trozos; un dibujo
+    profesional tiene una polilínea por curva. Se une cada extremo solo con su vecino más
+    cercano (si es mutuo) y solo cuando la unión es suave (giro de menos de 35°).
+    """
+    pieces = [list(s.points) for s in strokes if not s.closed]
+    closed = [s for s in strokes if s.closed]
+
+    def outward(points: list[tuple[float, float]], end: int) -> tuple[float, float]:
+        (x1, y1), (x2, y2) = (points[-1], points[-2]) if end else (points[0], points[1])
+        return x1 - x2, y1 - y2
+
+    changed = True
+    while changed:
+        changed = False
+        cells: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        for index, points in enumerate(pieces):
+            for end in (0, 1):
+                x, y = points[-1] if end else points[0]
+                cells.setdefault((int(x // tolerance_px), int(y // tolerance_px)), []).append((index, end))
+
+        def nearest(index: int, end: int) -> tuple[int, int] | None:
+            x, y = pieces[index][-1] if end else pieces[index][0]
+            best, best_distance = None, tolerance_px
+            for cx in range(int(x // tolerance_px) - 1, int(x // tolerance_px) + 2):
+                for cy in range(int(y // tolerance_px) - 1, int(y // tolerance_px) + 2):
+                    for other, other_end in cells.get((cx, cy), []):
+                        if other == index:
+                            continue
+                        ox, oy = pieces[other][-1] if other_end else pieces[other][0]
+                        distance = math.hypot(ox - x, oy - y)
+                        if distance <= best_distance:
+                            best, best_distance = (other, other_end), distance
+            return best
+
+        used: set[int] = set()
+        merged: list[list[tuple[float, float]]] = []
+        for index in range(len(pieces)):
+            if index in used:
+                continue
+            joined = False
+            for end in (1, 0):
+                partner = nearest(index, end)
+                if partner is None or partner[0] in used or partner[0] == index:
+                    continue
+                other, other_end = partner
+                if nearest(other, other_end) != (index, end):
+                    continue  # no es mutuo: hay un cruce, no una continuación
+                ux, uy = outward(pieces[index], end)
+                vx, vy = outward(pieces[other], other_end)
+                norm = math.hypot(ux, uy) * math.hypot(vx, vy)
+                if norm == 0 or -(ux * vx + uy * vy) / norm < _JOIN_MIN_COSINE:
+                    continue
+                first = pieces[index] if end else pieces[index][::-1]
+                second = pieces[other][::-1] if other_end else pieces[other]
+                merged.append(first + second)
+                used.update((index, other))
+                joined = changed = True
+                break
+            if not joined:
+                merged.append(pieces[index])
+                used.add(index)
+        pieces = merged
+    return [Stroke(points, False) for points in pieces] + closed
+
+
+def detect_detail_strokes(
     image: np.ndarray,
     dpi: int,
     explained: list[Segment],
     texts: list[TextItem],
     ignore_bottom_fraction: float = 0.0,
-) -> list[Segment]:
-    """Devuelve las líneas de detalle rectas que no están ya dibujadas en otra capa."""
+) -> list[Stroke]:
+    """Devuelve los trazos de un solo trazo del dibujo que aún no está en otra capa."""
     px_per_mm = dpi / _MM_PER_INCH
-    segments = _lsd_segments(image, dpi)
-    if len(segments) == 0:
-        return []
+    ink = binarize_ink(image, dpi)
+
+    # borrar de la tinta lo ya reconstruido y las letras leídas con seguridad
+    erase = np.zeros_like(ink)
+    band = max(int(round(_ERASE_BAND_PX_AT_300 * dpi / 300)), 3)
+    for a, b in explained:
+        cv2.line(erase, (int(a[0]), int(a[1])), (int(b[0]), int(b[1])), 255, band)
+    for item in texts:
+        if item.sure:
+            cv2.fillConvexPoly(erase, item.quad.astype(np.int32), 255)
+    ink = cv2.bitwise_and(ink, cv2.bitwise_not(erase))
     if ignore_bottom_fraction > 0:
-        limit = image.shape[0] * (1 - ignore_bottom_fraction)
-        segments = segments[(segments[:, 1] + segments[:, 3]) / 2 < limit]
+        ink[int(image.shape[0] * (1 - ignore_bottom_fraction)) :, :] = 0
 
-    length = np.hypot(segments[:, 2] - segments[:, 0], segments[:, 3] - segments[:, 1])
-    segments = segments[length >= 0.6 * px_per_mm]
-    fused, _widths = _merge_stroke_edges(segments, px_per_mm)
-    merged = merge_collinear_segments(fused, dpi=dpi)
-    lines = _snap_axis_aligned([s for s in merged if math.dist(*s) >= _MIN_LENGTH_MM * px_per_mm])
+    # cerrar huecos de 1 px y quitar las motas (manchas más cortas que ~1 mm)
+    ink = cv2.morphologyEx(ink, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(ink, connectivity=8)
+    keep = np.zeros(count, dtype=bool)
+    keep[1:] = np.maximum(stats[1:, cv2.CC_STAT_WIDTH], stats[1:, cv2.CC_STAT_HEIGHT]) >= _MIN_COMPONENT_MM * px_per_mm
+    ink = np.where(keep[labels], 255, 0).astype(np.uint8)
 
-    if explained:
-        starts = np.array([a for a, _b in explained], dtype=np.float64)
-        ends = np.array([b for _a, b in explained], dtype=np.float64)
-        tolerance = _EXPLAINED_TOL_MM * px_per_mm
-        kept = []
-        for a, b in lines:
-            samples = np.array([(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t) for t in np.linspace(0, 1, 7)])
-            if (_distance_to_segments(samples, starts, ends) <= tolerance).mean() < _SHARE_EXPLAINED:
-                kept.append((a, b))
-        lines = kept
+    skeleton = skeletonize(ink)
+    traced = trace_skeleton(
+        skeleton, spur_px=_SPUR_MM * px_per_mm, min_length_px=_MIN_STROKE_LENGTH_MM * px_per_mm
+    )
 
-    sure = [t for t in texts if t.sure]
-    if sure:
-        lines = [
-            (a, b)
-            for a, b in lines
-            if not any(t.contains((a[0] + b[0]) / 2, (a[1] + b[1]) / 2) for t in sure)
-        ]
+    traced = _join_strokes(traced, _JOIN_TOLERANCE_MM * px_per_mm)
 
-    logger.info("Detalle: %d líneas rectas limpias.", len(lines))
-    return lines
+    epsilon = _SIMPLIFY_MM * px_per_mm
+    snap_min = _SNAP_MIN_MM * px_per_mm
+    simplified: list[Stroke] = []
+    for stroke in traced:
+        approx = cv2.approxPolyDP(np.array(stroke.points, np.float32).reshape(-1, 1, 2), epsilon, stroke.closed)
+        points = [(float(x), float(y)) for x, y in approx[:, 0, :]]
+        if len(points) < 2 or (stroke.closed and len(points) < 3):
+            continue
+        simplified.append(Stroke(_snap_orthogonal(points, snap_min), stroke.closed))
+
+    # los tramos rectos sueltos se unen cuando son colineales (un muro partido por un cruce)
+    straight = [s for s in simplified if not s.closed and len(s.points) == 2]
+    others = [s for s in simplified if s.closed or len(s.points) != 2]
+    merged = merge_collinear_segments([(s.points[0], s.points[1]) for s in straight], dpi=dpi)
+    result = others + [Stroke([a, b]) for a, b in merged]
+
+    logger.info("Detalle: %d trazos de un solo trazo (%d rectos).", len(result), len(merged))
+    return result

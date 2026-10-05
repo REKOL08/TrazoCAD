@@ -15,7 +15,7 @@ import numpy as np
 
 from .dwg_converter import convert_dxf_to_dwg
 from .deskew import deskew
-from .detalle import detect_detail_lines
+from .detalle import detect_detail_strokes
 from .dxf_writer import build_dxf
 from .line_detector import detect_lines, filter_short_segments, merge_collinear_segments
 from .muebles import detect_fixtures
@@ -190,7 +190,7 @@ def convert_pdf(
     wall_thickness_mm: float | None = None,
     read_text: bool = True,
     keep_dxf: bool = False,
-    trace_visible: bool = True,
+    trace_visible: bool = False,
 ) -> ConversionResult:
     """Convierte un único PDF en un archivo de AutoCAD por página (.dwg, o .dxf sin ODA).
 
@@ -252,7 +252,7 @@ def convert_pdf(
                     + [line for window in windows for line in window.lines]
                     + [seg for f in fixtures for seg in zip(f.outline(), f.outline()[1:])]
                 )
-                detail = detect_detail_lines(image, page.dpi, explained, texts, ignore_bottom_fraction=bottom)
+                detail = detect_detail_strokes(image, page.dpi, explained, texts, ignore_bottom_fraction=bottom)
                 if not clean_only:
                     shapes = _without_read_letters(trace_shapes(image, dpi=page.dpi), texts)
                     before = len(shapes)

@@ -179,15 +179,15 @@ def test_la_vista_inicial_se_centra_en_lo_reconstruido_y_no_en_el_ruido_lejano(t
     assert vport.dxf.height < 60  # encuadre ajustado al dibujo, no a toda la extensión
 
 
-def test_el_calco_va_visible_por_defecto_y_se_puede_apagar(tmp_path: Path) -> None:
+def test_el_calco_va_apagado_por_defecto_y_se_puede_encender(tmp_path: Path) -> None:
     from src.dxf_writer import LAYER_TRACE
 
     mancha = [[(0.0, 0.0), (100.0, 0.0), (100.0, 50.0)]]
     visible = tmp_path / "visible.dxf"
     apagado = tmp_path / "apagado.dxf"
 
-    build_dxf([], dpi=300, image_height_px=1000, output_path=visible, shapes=[mancha])
-    build_dxf([], dpi=300, image_height_px=1000, output_path=apagado, shapes=[mancha], trace_visible=False)
+    build_dxf([], dpi=300, image_height_px=1000, output_path=visible, shapes=[mancha], trace_visible=True)
+    build_dxf([], dpi=300, image_height_px=1000, output_path=apagado, shapes=[mancha])
 
     assert not ezdxf.readfile(visible).layers.get(LAYER_TRACE).is_off()
     assert ezdxf.readfile(apagado).layers.get(LAYER_TRACE).is_off()
@@ -210,16 +210,24 @@ def test_el_escaneo_se_dibuja_como_relleno_sin_perder_los_agujeros(tmp_path: Pat
     assert len(rellenos[0].paths) == 2  # contorno exterior + agujero
 
 
-def test_las_lineas_de_detalle_van_en_su_capa(tmp_path: Path) -> None:
+def test_los_trazos_de_detalle_van_en_su_capa_como_lineas_y_polilineas(tmp_path: Path) -> None:
+    from src.centerline import Stroke
     from src.dxf_writer import LAYER_DETAIL
 
     salida = tmp_path / "detalle.dxf"
+    trazos = [
+        Stroke([(0.0, 0.0), (200.0, 0.0)]),
+        Stroke([(0.0, 50.0), (60.0, 80.0), (120.0, 50.0)]),
+        Stroke([(300.0, 300.0), (360.0, 300.0), (360.0, 360.0)], closed=True),
+    ]
 
-    build_dxf([], dpi=300, image_height_px=1000, output_path=salida, detail=[((0.0, 0.0), (200.0, 0.0))])
+    build_dxf([], dpi=300, image_height_px=1000, output_path=salida, detail=trazos)
 
-    lineas = list(ezdxf.readfile(salida).modelspace().query("LINE"))
-    assert [linea.dxf.layer for linea in lineas] == [LAYER_DETAIL]
-
+    modelspace = ezdxf.readfile(salida).modelspace()
+    assert [e.dxf.layer for e in modelspace.query("LINE")] == [LAYER_DETAIL]
+    polilineas = list(modelspace.query("LWPOLYLINE"))
+    assert len(polilineas) == 2 and all(e.dxf.layer == LAYER_DETAIL for e in polilineas)
+    assert sorted(e.closed for e in polilineas) == [False, True]
 
 def test_las_alturas_de_texto_parecidas_se_unifican(tmp_path: Path) -> None:
     import numpy as np

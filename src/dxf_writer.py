@@ -19,6 +19,7 @@ from ezdxf import bbox, const, zoom
 from ezdxf.enums import TextEntityAlignment
 
 from .arcos import Arc
+from .centerline import Stroke
 from .line_detector import Segment
 from .muebles import Fixture
 from .puertas import Door
@@ -117,8 +118,8 @@ def build_dxf(
     doors: list[Door] | None = None,
     windows: list[Window] | None = None,
     fixtures: list[Fixture] | None = None,
-    detail: list[Segment] | None = None,
-    trace_visible: bool = True,
+    detail: list[Stroke] | None = None,
+    trace_visible: bool = False,
     shapes: list[Shape] | None = None,
 ) -> Path:
     """Escribe `segments` y `polylines` (en píxeles) en un DXF nuevo.
@@ -209,8 +210,12 @@ def build_dxf(
                 centre, radius, arc.start_deg, arc.end_deg, dxfattribs={"layer": LAYER_ARCS}
             )
 
-    for (x1, y1), (x2, y2) in detail:
-        modelspace.add_line(to_mm(x1, y1), to_mm(x2, y2), dxfattribs={"layer": LAYER_DETAIL})
+    for stroke in detail:
+        points = [to_mm(px, py) for px, py in stroke.points]
+        if not stroke.closed and len(points) == 2:
+            modelspace.add_line(points[0], points[1], dxfattribs={"layer": LAYER_DETAIL})
+        else:
+            modelspace.add_lwpolyline(points, close=stroke.closed, dxfattribs={"layer": LAYER_DETAIL})
 
     for fixture in fixtures:
         theta = math.radians(fixture.angle_deg)
@@ -263,7 +268,8 @@ def build_dxf(
         )
 
     if not trace_visible and LAYER_TRACE in layers:
-        # con trace_visible=False el calco queda en el archivo pero apagado
+        # por defecto el relleno del escaneo queda en el archivo pero apagado: lo visible son
+        # las capas reconstruidas y los trazos de detalle; se enciende para comparar
         layers.get(LAYER_TRACE).off()
 
     _zoom_to_drawing(modelspace)
