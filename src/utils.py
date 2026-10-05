@@ -24,6 +24,7 @@ MAX_PDF_SIZE_WARN_MB = 80
 # cada PDF de entrada. Es fijo (no se pregunta al usuario) para que el
 # proceso de arrastrar-y-soltar no requiera ninguna interacción adicional.
 OUTPUT_SUBFOLDER_NAME = "Convertidos_DWG"
+PHOTOS_SUBFOLDER_NAME = "planos_de_prueba"
 
 
 class ConversionError(Exception):

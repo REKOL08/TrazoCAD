@@ -42,6 +42,7 @@ from src.utils import (  # noqa: E402
     MAX_DPI,
     MIN_DPI,
     OUTPUT_SUBFOLDER_NAME,
+    PHOTOS_SUBFOLDER_NAME,
     PROJECT_ROOT,
     find_pdfs,
     setup_logging,
@@ -128,6 +129,21 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="No leer los textos con OCR (más rápido; los textos quedan solo como calco).",
     )
     parser.add_argument(
+        "--fotos",
+        type=Path,
+        default=None,
+        metavar="CARPETA",
+        help=(
+            "Carpeta con fotos de partes del plano para leer mejor las cotas y los textos "
+            "(por defecto 'planos_de_prueba'; las fotos que no coinciden con el plano se ignoran)."
+        ),
+    )
+    parser.add_argument(
+        "--sin-fotos",
+        action="store_true",
+        help="No usar fotos de partes del plano, aunque haya en la carpeta.",
+    )
+    parser.add_argument(
         "--conservar-dxf",
         action="store_true",
         help="Guardar también el .dxf junto al .dwg (por defecto se entrega un solo archivo por plano).",
@@ -192,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Los resultados se guardarán en: %s", output_dir)
 
     successes = 0
+    photos_dir = None if args.sin_fotos else (args.fotos or PROJECT_ROOT / PHOTOS_SUBFOLDER_NAME)
     failures = 0
     for pdf_path in pdfs:
         logger.info("Procesando: %s", pdf_path)
@@ -209,6 +226,7 @@ def main(argv: list[str] | None = None) -> int:
             read_text=not args.sin_texto,
             keep_dxf=args.conservar_dxf,
             trace_visible=args.calco_visible,
+            photos_dir=photos_dir,
         )
         if result.success:
             successes += 1

@@ -25,6 +25,7 @@ from .puertas import detect_doors
 from .ventanas import detect_windows
 from .vectorizer import binarize_ink
 from .pdf_processor import render_pdf_pages
+from .fotos import find_photos, merge_texts, read_photo_texts, register_photos
 from .texto import TextItem, read_texts
 from .utils import ConversionError, validate_pdf
 from .vectorizer import trace_shapes
@@ -155,6 +156,17 @@ def _deliver(dxf_path: Path, output_dir: Path, generate_dwg: bool, keep_dxf: boo
     return [_copy_replacing(dxf_path, output_dir / dxf_path.name)]
 
 
+def _with_photo_texts(texts: list[TextItem], image, bottom: float, photos_dir: Path | None) -> list[TextItem]:
+    """Suma a los textos del escaneo los que se leen mejor en las fotos de partes del plano."""
+    photos = find_photos(photos_dir) if photos_dir else []
+    if not photos:
+        return texts
+    registered = register_photos(image, photos)
+    if not registered:
+        return texts
+    return merge_texts(texts, read_photo_texts(registered), image.shape[:2], bottom)
+
+
 LOW_RESOLUTION_DPI = 250
 
 
@@ -191,10 +203,13 @@ def convert_pdf(
     read_text: bool = True,
     keep_dxf: bool = False,
     trace_visible: bool = False,
+    photos_dir: Path | None = None,
 ) -> ConversionResult:
     """Convierte un único PDF en un archivo de AutoCAD por página (.dwg, o .dxf sin ODA).
 
     `rotation` e `ignore_bottom_fraction` en None se detectan solos (giro de página y cajetín).
+    `photos_dir`: carpeta con fotos de partes del plano; las que coinciden con él se usan para
+    leer mejor los textos y las cotas (las que no, se ignoran).
 
     No lanza excepciones hacia el llamador: cualquier error se captura y se
     devuelve dentro de ConversionResult para que un lote de PDFs pueda
@@ -243,6 +258,7 @@ def convert_pdf(
                 )
                 if read_text:
                     texts = read_texts(image, ignore_bottom_fraction=bottom)
+                    texts = _with_photo_texts(texts, image, bottom, photos_dir)
                 fixtures = detect_fixtures(image, page.dpi, texts, wall_thickness_px=thickness)
                 explained = (
                     list(walls)

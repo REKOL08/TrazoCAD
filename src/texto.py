@@ -188,6 +188,21 @@ def _deduplicate(items: list[TextItem]) -> list[TextItem]:
     return kept
 
 
+_DIGIT_LOOKALIKES = str.maketrans({"O": "0", "o": "0", "D": "0", "S": "5", "s": "5", "Z": "2", "z": "2", "l": "1", "I": "1", "|": "1", "B": "8"})
+_MEASURE = re.compile(r"^(R?)(\d{1,2})[.,](\d{1,2})(m?)$")
+_MEASURE_LOOSE = re.compile(r"^R?[0-9OoDSsZzlI|B]{1,2}[.,][0-9OoDSsZzlI|B]{1,2}m?$")
+
+
+def _fix_measure(token: str) -> str:
+    """Una cota o radio como 'RO.85' o 'z.05' se lee con letras por cifras: se arregla."""
+    if not _MEASURE_LOOSE.match(token) or not any(ch.isdigit() for ch in token):
+        return token
+    prefix = "R" if token.startswith("R") else ""
+    body = token[len(prefix):]
+    fixed = prefix + body[:-1].translate(_DIGIT_LOOKALIKES) + (body[-1] if body[-1] == "m" else body[-1].translate(_DIGIT_LOOKALIKES))
+    return fixed if _MEASURE.match(fixed) else token
+
+
 def correct_spanish(text: str) -> tuple[str, bool]:
     """Corrige palabras casi iguales a las del vocabulario de planos.
 
@@ -199,7 +214,7 @@ def correct_spanish(text: str) -> tuple[str, bool]:
     for token in text.split():
         letters = re.sub(r"[^A-ZÑ]", "", token.upper().replace("Ñ", "N").replace("~", ""))
         if len(letters) < 3 or any(ch.isdigit() for ch in token):
-            words.append(token)
+            words.append(_fix_measure(token))
             continue
         plain = {w.replace("Ñ", "N"): w for w in _VOCABULARY}
         if letters in plain:

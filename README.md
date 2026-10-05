@@ -140,6 +140,8 @@ python main.py planta1.pdf --ignorar-inferior 0.17  # forzar el cajetín (por de
 python main.py planta1.pdf --conservar-dxf      # guardar también el .dxf junto al .dwg
 python main.py planta1.pdf --sin-texto          # no leer textos (más rápido, ~30 s menos)
 python main.py planta1.pdf --calco-visible      # encender el relleno gris del escaneo (por defecto va apagado)
+python main.py planta1.pdf --fotos MIS_FOTOS    # carpeta con fotos de partes del plano (por defecto: planos_de_prueba)
+python main.py planta1.pdf --sin-fotos          # ignorar las fotos aunque haya en la carpeta
 python main.py planta1.pdf --solo-limpio        # sin el relleno del escaneo en el archivo (más pequeño)
 python main.py planta1.pdf --grosor-muro 1.0    # espesor de muro en mm sobre el papel (si no, se mide solo)
 python main.py planta1.pdf --modo lineas        # solo líneas rectas (modo alterno)
@@ -201,6 +203,25 @@ La carpeta `planos_de_prueba/` es para dejar los planos con los que quieres afin
 a mano). **Su contenido no se sube a GitHub** (solo el `LEEME.txt`), porque los planos pueden ser
 confidenciales. Detalles en `planos_de_prueba/LEEME.txt`.
 
+### Fotos de partes del plano (mejoran la lectura de cotas y textos)
+
+Si el escaneo es de baja resolución (150 dpi), las cotas pequeñas no se leen. Una **foto de celular
+de un trozo del mismo plano** tiene mucha más resolución efectiva en esa zona. Déjalas en
+`planos_de_prueba/` (o indica otra carpeta con `--fotos`) y el convertidor las usa solo:
+
+1. Alinea cada foto con el plano (puntos SIFT sin sombras, homografía con RANSAC, prueba los 4
+   giros). La foto puede estar girada, torcida o con sombras. Las fotos de **otro** plano o sin
+   coincidencias se descartan solas, igual que las repetidas.
+2. Lee sus textos con el mismo OCR, descarta el borde de la foto (desenfocado) y lleva cada texto al
+   marco del plano. Las cotas que el OCR confundía (`RO.85`, `z.05`) se corrigen.
+3. Suma lo que el escaneo no leyó y se queda con la mejor lectura cuando ambos leen lo mismo.
+
+Con las 3 fotos del plano de prueba los textos pasaron de **64 a 129** (y las cotas de ~13 a ~55).
+Cuesta unos 2-3 minutos extra por plano (OCR de cada foto). Limites: solo mejora las zonas que
+cubren las fotos; no cambia la geometría (muros, arcos...), que sigue saliendo del escaneo; las
+sombras fuertes o los dobleces del papel pueden dar lecturas erróneas, por eso hay que revisar
+la capa `TEXTOS_REVISAR`.
+
 ## Estructura del proyecto
 
 ```
@@ -221,6 +242,7 @@ planos2dwg/
 │   ├── ventanas.py         # Ventanas: huecos alineados en las dos caras de un muro con líneas dentro
 │   ├── deskew.py           # Enderezado de escaneos inclinados
 │   ├── orientacion.py      # Giro de página y cajetín detectados solos
+│   ├── fotos.py            # Alinea fotos de partes del plano y suma los textos/cotas que se leen mejor en ellas
 │   ├── detalle.py          # Trazos de detalle de un solo trazo (esqueleto) de lo que no es muro/eje/arco/texto
 │   ├── centerline.py       # Adelgazado de la tinta a su línea central y recorrido del grafo
 │   ├── vectorizer.py       # Imagen -> calcado fiel de la tinta (OpenCV)

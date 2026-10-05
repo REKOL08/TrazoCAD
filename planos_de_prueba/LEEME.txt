@@ -18,6 +18,10 @@ Que conviene poner (de mas a menos util):
          ventanas: 6
          banos: 4
 
+  5. Fotos de celular de PARTES del mismo plano (de frente, con buena luz, cerca, letra legible).
+     Se alinean solas con el plano y mejoran la lectura de cotas y textos. Las de otro plano se
+     ignoran. Las fotos tambien viven aqui y tampoco se suben a GitHub.
+
 Nombres sin espacios ni tildes si es posible (planta1.pdf, no "Planta Nivel 1.pdf").
 
 Cuando haya planos aqui, se convierten todos y se compara el resultado plano por plano.
