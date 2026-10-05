@@ -6,9 +6,26 @@ textos editables y un calco de referencia del escaneo. Pensada para que un
 arquitecto o ingeniero sin experiencia en programación la instale en pocos
 minutos y la use así:
 
-> **Arrastra el PDF sobre `convertir.bat` y recoge el `.dwg` en la carpeta
-> `Convertidos_DWG`.** Sin elegir nada: el programa detecta solo si el plano
-> está de lado y dónde está el cajetín.
+> **Doble clic en `abrir_app.bat`, arrastra el PDF a la ventana de chat y toca
+> «Abrir plano».** O, sin ventana: arrastra el PDF sobre `convertir.bat` y recoge el
+> `.dwg` en la carpeta `Convertidos_DWG`. Sin elegir nada: el programa detecta solo
+> si el plano está de lado y dónde está el cajetín.
+
+## La ventana de chat (`abrir_app.bat`)
+
+Una ventana sencilla, tipo chat de los primeros mensajeros: el programa te saluda, tú le pasas el
+plano y te va contando lo que hace.
+
+1. Doble clic en **`abrir_app.bat`**.
+2. **Arrastra el PDF** a la ventana (o toca el clip 📎). Puedes soltar varios o una carpeta: se
+   convierten uno tras otro.
+3. Verás mensajes cortos («✔ Muros y ejes dibujados», «📷 Usé tus fotos...») y al final los botones
+   **Abrir plano** y **Abrir carpeta**. Puedes tocar **Detener** mientras convierte.
+
+Las opciones son **fichas** sobre la barra de abajo; toca para encender o apagar (el chat te
+explica qué cambió): *Usar fotos*, *Leer textos* (apagado = más rápido, sin letras), *Relleno gris*,
+*Guardar DXF*, *Giro* (auto / 90 / 180 / 270) y *Carpeta de fotos*. Por dentro la ventana ejecuta el
+mismo `main.py` en un proceso aparte, así que el resultado es idéntico al de la línea de comandos.
 
 ## ⚠️ Qué hace y qué NO hace esta herramienta (leer antes de usar)
 
@@ -227,9 +244,12 @@ la capa `TEXTOS_REVISAR`.
 ```
 planos2dwg/
 ├── main.py                 # Punto de entrada (CLI + selector de carpeta)
+├── abrir_app.bat           # Abre la ventana de chat (arrastra el PDF y listo)
+├── app.py                  # La ventana de chat (tkinter)
 ├── convertir.bat           # Arrastra tus PDF aquí (hace todo solo)
 ├── instalar.bat            # Instalador de un clic
 ├── requirements.txt        # Dependencias de producción
+├── requirements-gui.txt    # Arrastrar y soltar para la ventana (opcional)
 ├── requirements-dev.txt    # Dependencias + pytest para desarrollo
 ├── setup.py                # Instalación opcional vía pip (pip install -e .)
 ├── src/
@@ -242,6 +262,7 @@ planos2dwg/
 │   ├── ventanas.py         # Ventanas: huecos alineados en las dos caras de un muro con líneas dentro
 │   ├── deskew.py           # Enderezado de escaneos inclinados
 │   ├── orientacion.py      # Giro de página y cajetín detectados solos
+│   ├── gui_logic.py        # Lógica de la ventana: comando, archivos y mensajes amables (probada)
 │   ├── fotos.py            # Alinea fotos de partes del plano y suma los textos/cotas que se leen mejor en ellas
 │   ├── detalle.py          # Trazos de detalle de un solo trazo (esqueleto) de lo que no es muro/eje/arco/texto
 │   ├── centerline.py       # Adelgazado de la tinta a su línea central y recorrido del grafo

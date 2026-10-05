@@ -43,6 +43,14 @@ if errorlevel 1 (
 )
 
 echo.
+echo Instalando arrastrar y soltar para la ventana (opcional) ...
+".venv\Scripts\python.exe" -m pip install -r requirements-gui.txt
+if errorlevel 1 (
+    echo [AVISO] No se pudo instalar. La ventana funciona igual, pero con el boton del clip
+    echo en vez de arrastrar el PDF.
+)
+
+echo.
 echo ============================================
 echo  Instalacion completa.
 echo  Ya puedes arrastrar tus PDF sobre convertir.bat
