@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 import ezdxf
+from ezdxf import bbox, zoom
 from ezdxf.enums import TextEntityAlignment
 
 from .arcos import Arc
@@ -42,6 +43,25 @@ LAYER_TEXT = "TEXTOS"
 LAYER_TEXT_REVIEW = "TEXTOS_REVISAR"
 _TEXT_HEIGHT_FACTOR = 0.78
 MM_PER_INCH = 25.4
+
+
+_CLEAN_LAYERS = frozenset(
+    {"MUROS", "EJES", "ARCOS", "PUERTAS", "VENTANAS", "SANITARIOS", "TEXTOS", "TEXTOS_REVISAR", "COTAS"}
+)
+
+
+def _zoom_to_drawing(modelspace) -> None:
+    """Deja la vista inicial centrada en el dibujo, no en la mancha más lejana del calco.
+
+    Se encuadra lo reconstruido (muros, ejes, textos...); si no hay nada, todo el modelo.
+    """
+    content = [e for e in modelspace if e.dxf.layer in _CLEAN_LAYERS]
+    box = bbox.extents(content) if content else None
+    if box is not None and box.has_data:
+        size = box.size
+        zoom.center(modelspace, box.center, (size.x * 1.08, size.y * 1.08))
+    else:
+        zoom.extents(modelspace)
 
 
 def _text_layer(item: TextItem) -> str:
@@ -188,6 +208,8 @@ def build_dxf(
             close=True,
             dxfattribs={"layer": LAYER_TRACE},
         )
+
+    _zoom_to_drawing(modelspace)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     document.saveas(output_path)

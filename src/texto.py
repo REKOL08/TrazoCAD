@@ -100,6 +100,19 @@ def _engine():
     return engine
 
 
+def _engine_without_classifier():
+    """Motor sin el clasificador de 180°: el texto boca abajo NO se corrige, se lee mal.
+
+    Solo para detectar la orientación de la página; la lectura normal usa `_engine`.
+    """
+    engine = getattr(_LOCAL, "engine_no_cls", None)
+    if engine is None:
+        from rapidocr_onnxruntime import RapidOCR
+
+        engine = _LOCAL.engine_no_cls = RapidOCR(use_angle_cls=False)
+    return engine
+
+
 def _rotate(image: np.ndarray, degrees: int) -> np.ndarray:
     if degrees == 0:
         return image

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
 from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,6 +18,7 @@ from .deskew import deskew
 from .dxf_writer import build_dxf
 from .line_detector import detect_lines, filter_short_segments, merge_collinear_segments
 from .muebles import detect_fixtures
+from .orientacion import detect_rotation, detect_title_block_fraction
 from .muros import detect_plan
 from .puertas import detect_doors
 from .ventanas import detect_windows
@@ -121,15 +124,33 @@ def rotate_image(image: np.ndarray, degrees_ccw: int) -> np.ndarray:
     return np.ascontiguousarray(np.rot90(image, degrees_ccw // 90))
 
 
-def _save_dxf(path: Path, **geometry) -> Path:
-    """Escribe el DXF; si Windows lo tiene bloqueado, lo guarda con otra hora en el nombre."""
+def _copy_replacing(source: Path, target: Path) -> Path:
+    """Copia `source` a `target` (reemplazándolo). Si Windows lo tiene bloqueado, usa otro nombre."""
+    target.parent.mkdir(parents=True, exist_ok=True)
     try:
-        build_dxf(output_path=path, **geometry)
+        shutil.copy2(source, target)
     except PermissionError:
-        path = path.with_name(f"{path.stem}_{datetime.now().strftime('%H%M%S')}.dxf")
-        logger.warning("El archivo está en uso (¿abierto en AutoCAD?); se guarda como %s", path.name)
-        build_dxf(output_path=path, **geometry)
-    return path
+        target = target.with_name(f"{target.stem}_{datetime.now().strftime('%H%M%S')}{target.suffix}")
+        logger.warning("El archivo anterior está en uso (¿abierto en AutoCAD?); se guarda como %s", target.name)
+        shutil.copy2(source, target)
+    return target
+
+
+def _deliver(dxf_path: Path, output_dir: Path, generate_dwg: bool, keep_dxf: bool) -> list[Path]:
+    """Entrega UN archivo por plano: el .dwg si se puede generar; si no, el .dxf.
+
+    El DXF se construye en una carpeta temporal; solo se guarda junto al DWG si se
+    pidió conservarlo.
+    """
+    if generate_dwg:
+        with tempfile.TemporaryDirectory(prefix="planos2dwg_dwg_") as tmp:
+            built = convert_dxf_to_dwg(dxf_path, Path(tmp))
+            if built is not None:
+                delivered = [_copy_replacing(built, output_dir / built.name)]
+                if keep_dxf:
+                    delivered.append(_copy_replacing(dxf_path, output_dir / dxf_path.name))
+                return delivered
+    return [_copy_replacing(dxf_path, output_dir / dxf_path.name)]
 
 
 LOW_RESOLUTION_DPI = 250
@@ -145,17 +166,13 @@ def _warn_if_low_resolution(pdf_name: str, native_dpi: float | None) -> None:
         )
 
 
-def _timestamp() -> str:
-    """Marca de tiempo para el nombre del archivo: cada conversión es un archivo nuevo."""
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
-
-
 @dataclass
 class ConversionResult:
     pdf_path: Path
     success: bool
     outputs: list[Path] = field(default_factory=list)
     error: str | None = None
+    summary: dict[str, int] = field(default_factory=dict)
 
 
 def convert_pdf(
@@ -165,13 +182,16 @@ def convert_pdf(
     generate_dwg: bool = True,
     min_length_mm: float = DEFAULT_MIN_LENGTH_MM,
     mode: str = MODE_TRACE,
-    rotation: int = 0,
-    ignore_bottom_fraction: float = 0.0,
+    rotation: int | None = None,
+    ignore_bottom_fraction: float | None = None,
     clean_only: bool = False,
     wall_thickness_mm: float | None = None,
     read_text: bool = True,
+    keep_dxf: bool = False,
 ) -> ConversionResult:
-    """Convierte un único PDF a uno o varios archivos DXF/DWG (uno por página).
+    """Convierte un único PDF en un archivo de AutoCAD por página (.dwg, o .dxf sin ODA).
+
+    `rotation` e `ignore_bottom_fraction` en None se detectan solos (giro de página y cajetín).
 
     No lanza excepciones hacia el llamador: cualquier error se captura y se
     devuelve dentro de ConversionResult para que un lote de PDFs pueda
@@ -183,9 +203,12 @@ def convert_pdf(
         pages = render_pdf_pages(pdf_path, dpi=dpi)
 
         outputs: list[Path] = []
+        summary: dict[str, int] = {}
         for page in pages:
             _warn_if_low_resolution(pdf_path.name, page.native_dpi)
-            image = deskew(rotate_image(page.image, rotation), page.dpi)
+            page_rotation = detect_rotation(page.image, page.dpi) if rotation is None else rotation
+            image = deskew(rotate_image(page.image, page_rotation), page.dpi)
+            bottom = detect_title_block_fraction(image, page.dpi) if ignore_bottom_fraction is None else ignore_bottom_fraction
             segments: list = []
             polylines: list = []
             walls: list = []
@@ -205,7 +228,7 @@ def convert_pdf(
                 walls, axes, arcs, thickness = detect_plan(
                     image,
                     page.dpi,
-                    ignore_bottom_fraction=ignore_bottom_fraction,
+                    ignore_bottom_fraction=bottom,
                     wall_thickness_mm=wall_thickness_mm,
                 )
                 doors = detect_doors(image, page.dpi, wall_thickness_px=thickness)
@@ -214,7 +237,7 @@ def convert_pdf(
                     walls, binarize_ink(image, page.dpi), page.dpi, thickness or page.dpi / 25.4
                 )
                 if read_text:
-                    texts = read_texts(image, ignore_bottom_fraction=ignore_bottom_fraction)
+                    texts = read_texts(image, ignore_bottom_fraction=bottom)
                 fixtures = detect_fixtures(image, page.dpi, texts, wall_thickness_px=thickness)
                 if not clean_only:
                     polylines = _without_read_letters(trace_ink(image, dpi=page.dpi), texts)
@@ -239,24 +262,14 @@ def convert_pdf(
                 continue
 
             suffix = "" if len(pages) == 1 else f"_p{page.page_number}"
-            # nombre único por conversión: nunca se pisa un DXF que AutoCAD,
-            # OneDrive o el antivirus puedan tener bloqueado
-            base = output_dir / f"{pdf_path.stem}{suffix}_{_timestamp()}"
-
-            # Con calco se entregan dos archivos: el completo (con el calco de
-            # referencia) y el limpio (solo lo reconstruido), para no tener que
-            # apagar capas a mano.
-            variants = [("", polylines)]
-            if mode == MODE_TRACE and not clean_only:
-                variants = [("_completo", polylines), ("_limpio", [])]
-
-            for tag, variant_polylines in variants:
-                dxf_path = _save_dxf(
-                    Path(f"{base}{tag}.dxf"),
-                    segments=segments,
+            with tempfile.TemporaryDirectory(prefix="planos2dwg_dxf_") as tmp:
+                dxf_path = Path(tmp) / f"{pdf_path.stem}{suffix}.dxf"
+                build_dxf(
+                    segments,
                     dpi=page.dpi,
                     image_height_px=image.shape[0],
-                    polylines=variant_polylines,
+                    output_path=dxf_path,
+                    polylines=polylines,
                     walls=walls,
                     axes=axes,
                     arcs=arcs,
@@ -265,11 +278,12 @@ def convert_pdf(
                     windows=windows,
                     fixtures=fixtures,
                 )
-                outputs.append(dxf_path)
-                if generate_dwg:
-                    dwg_path = convert_dxf_to_dwg(dxf_path, output_dir)
-                    if dwg_path is not None:
-                        outputs.append(dwg_path)
+                outputs.extend(_deliver(dxf_path, output_dir, generate_dwg, keep_dxf))
+            for key, items in (
+                ("muros", walls), ("ejes", axes), ("arcos", arcs), ("puertas", doors),
+                ("ventanas", windows), ("sanitarios", fixtures), ("textos", texts),
+            ):
+                summary[key] = summary.get(key, 0) + len(items)
 
         if not outputs:
             return ConversionResult(
@@ -278,7 +292,7 @@ def convert_pdf(
                 error="No se detectó ninguna línea en el PDF; revisa la calidad del escaneo.",
             )
 
-        return ConversionResult(pdf_path=pdf_path, success=True, outputs=outputs)
+        return ConversionResult(pdf_path=pdf_path, success=True, outputs=outputs, summary=summary)
 
     except ConversionError as exc:
         logger.error("'%s': %s", pdf_path.name, exc)

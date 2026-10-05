@@ -1,14 +1,18 @@
 # Planos2DWG
 
-Herramienta de línea de comandos que convierte planos escaneados en PDF (blanco
-y negro, de arquitectura o ingeniería) en archivos **DXF editables**, con
-conversión opcional a **DWG real** si tienes instalado el conversor gratuito
-de Autodesk/ODA. Pensada para que un arquitecto o ingeniero sin experiencia en
-programación pueda instalarla y usarla en pocos minutos, arrastrando archivos.
+Convierte un plano escaneado en PDF en **un solo archivo de AutoCAD (`.dwg`)**,
+con el dibujo separado en capas: muros, ejes, puertas, ventanas, sanitarios,
+textos editables y un calco de referencia del escaneo. Pensada para que un
+arquitecto o ingeniero sin experiencia en programación la instale en pocos
+minutos y la use así:
+
+> **Arrastra el PDF sobre `convertir.bat` y recoge el `.dwg` en la carpeta
+> `Convertidos_DWG`.** Sin elegir nada: el programa detecta solo si el plano
+> está de lado y dónde está el cajetín.
 
 ## ⚠️ Qué hace y qué NO hace esta herramienta (leer antes de usar)
 
-Cada conversión entrega **dos archivos**: `..._limpio.dxf` (solo lo reconstruido: muros, ejes, arcos y textos; ordenado pero incompleto) y `..._completo.dxf` (lo mismo más el calco de referencia, con todo el dibujo del escaneo pero más sucio). Tienen **capas**:
+Cada plano se entrega como **un solo archivo** (`nombre-del-pdf.dwg`) con estas **capas**. Lo reconstruido va en capas propias y, de fondo en gris, el calco de referencia del escaneo; el archivo se abre ya centrado en el dibujo:
 
 | Capa | Qué contiene | Calidad |
 |---|---|---|
@@ -21,7 +25,7 @@ Cada conversión entrega **dos archivos**: `..._limpio.dxf` (solo lo reconstruid
 | `TEXTOS` | Los nombres de espacios y las cifras leídos con OCR, como **texto de AutoCAD editable** (se pueden corregir con doble clic), en azul | Buena en nombres (SALON SOCIAL, COCINA, ACCESO...); se corrigen confusiones típicas con un vocabulario de planos (BARO -> BAÑO) |
 | `COTAS` | Solo las **cifras** de las cotas (2.05, 0.90...) que el OCR leyó con seguridad, en verde, separadas de los nombres de los espacios | **Incompleta**: con un escaneo de 150 dpi se leen pocas cifras. No se generan cotas de AutoCAD (`DIMENSION`), solo el texto |
 | `TEXTOS_REVISAR` | Lecturas dudosas (poca confianza, no reconocidas en el vocabulario) en naranja | Hay que revisarlas a mano; su dibujo original sigue en `CALCADO_REFERENCIA` para comparar |
-| `CALCADO_REFERENCIA` | Calco fiel de toda la tinta del escaneo (textos, símbolos, cotas, curvas) como polilíneas, con las líneas largas suavizadas y enderezadas | Se ve como el PDF; es una **referencia para calcar encima**, apágala (`LAYER OFF`) para ver solo lo limpio |
+| `CALCADO_REFERENCIA` | Calco fiel de toda la tinta del escaneo (textos, símbolos, cotas, curvas) como polilíneas, con las líneas largas suavizadas y enderezadas | Se ve como el PDF; es una **referencia para calcar encima**. Apágala (`LAYER OFF` o desde el administrador de capas) para ver solo lo reconstruido |
 
 - **No son objetos CAD "inteligentes"**: no hay cotas (`DIMENSION`) ni muebles como bloques (solo sanitarios como elipses),
   y las puertas y ventanas son solo geometría (no bloques con sus atributos), y los muros no tienen relleno ni espesor como objeto.
@@ -31,21 +35,20 @@ Cada conversión entrega **dos archivos**: `..._limpio.dxf` (solo lo reconstruid
   terminado.
 - Modo `lineas` (`--modo lineas`): solo líneas rectas sueltas, sin muros ni
   textos. Más limpio pero muy incompleto; no se recomienda.
-- **Si el plano sale de lado, usa `--rotar 90`** o arrastra los PDF sobre
-  `convertir_girado_90.bat`. El escaneo también se **endereza** solo si viene
-  ligeramente inclinado.
-- **Rótulo del plano:** el recuadro de datos del plano (cajetín) se confunde
-  con muros. Usa `--ignorar-inferior 0.17` para ignorar el 17 % inferior de la
-  hoja al buscar muros y ejes (`convertir_girado_90.bat` ya lo incluye).
+- **El giro y el cajetín se detectan solos.** Si el escaneo viene de lado (como el
+  del plano de prueba), se lee el texto en las cuatro orientaciones y se elige la
+  que reconoce más palabras de plano (necesita el OCR; sin él no se gira). El
+  recuadro de datos del plano (cajetín) se localiza como una pila de líneas largas
+  en la parte baja y se ignora al buscar muros. Si se equivoca, puedes forzarlo con
+  `--rotar 0|90|180|270` y `--ignorar-inferior 0.17`. Un escaneo ligeramente
+  inclinado también se **endereza** solo.
 - La fidelidad depende de la calidad del escaneo. Escanea a 300-400 DPI en
   blanco y negro o gris.
-- **No genera un archivo `.dwg` binario por sí sola.** Ninguna librería libre
-  de Python puede escribir `.dwg` (es un formato propietario de Autodesk). Lo
-  que el script genera de forma nativa es **DXF**, que AutoCAD abre
-  exactamente igual que un DWG (`Archivo > Abrir`). Si necesitas el archivo
-  con extensión `.dwg` literal, instala el conversor gratuito **ODA File
-  Converter** (ver [sección dedicada](#convertir-a-dwg-real-opcional)) y el
-  script lo usará automáticamente.
+- **El `.dwg` lo escribe ODA File Converter.** Ninguna librería libre de Python
+  escribe `.dwg` (es un formato propietario de Autodesk): el programa construye un
+  DXF y lo convierte con ODA File Converter (ver
+  [instalación](#convertir-a-dwg-real)). **Sin ODA instalado se entrega el mismo
+  plano como `.dxf`**, que AutoCAD abre igual. En ambos casos el archivo es único.
 - Si ya tienes el **DWG original** del plano, eso siempre dará mejor
   resultado que cualquier conversión desde un escaneo.
 
@@ -57,8 +60,8 @@ Cada conversión entrega **dos archivos**: `..._limpio.dxf` (solo lo reconstruid
 - 4 GB de RAM como mínimo (8 GB recomendado si vas a convertir planos muy
   grandes o en lote).
 - Alrededor de 500 MB libres en disco para las dependencias.
-- (Opcional) [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter)
-  gratuito, solo si quieres archivos `.dwg` reales además de `.dxf`.
+- [ODA File Converter](https://www.opendesign.com/guestfiles/oda_file_converter)
+  gratuito, para que el archivo salga como `.dwg` (sin él sale como `.dxf`).
 
 ## Instalación (menos de 5 minutos)
 
@@ -108,17 +111,16 @@ capa `TEXTOS_REVISAR`.
 
 Arrastra uno o varios archivos PDF — o una carpeta completa con PDF dentro,
 estén donde estén en tu PC — sobre el ícono de **`convertir.bat`**. Se
-abrirá una consola mostrando el progreso y, al terminar, los archivos
-`.dxf` (y `.dwg` si corresponde) quedarán organizados dentro de la
-subcarpeta **`Convertidos_DWG`**, creada automáticamente **dentro de esta
-misma carpeta del programa** (no junto al PDF original). El nombre de esa
-subcarpeta es fijo: el programa nunca pregunta cómo llamarla.
+abrirá una consola mostrando el progreso (un plano tarda 1-2 minutos) y, al
+terminar, se abre la carpeta **`Convertidos_DWG`** (dentro de esta misma carpeta
+del programa, no junto al PDF) con **un archivo por plano**: `nombre-del-pdf.dwg`.
+El programa nunca pregunta nada.
 
-> Cada conversión genera un archivo **nuevo con la fecha y hora en el nombre**
-> (por ejemplo `planta1_20261002_154715_limpio.dxf`). Así nunca se sobrescribe un
-> DXF que AutoCAD, OneDrive o el antivirus tengan abierto o bloqueado (si no,
-> AutoCAD avisa que el archivo "está en uso o es de solo lectura"). Borra a
-> mano las versiones viejas que ya no necesites.
+> Si conviertes de nuevo el mismo PDF, el archivo se **reemplaza**. Si ese
+> archivo está abierto en AutoCAD (Windows no deja sobrescribirlo), el nuevo se
+> guarda con la hora en el nombre en vez de fallar (por ejemplo
+> `planta1_154715.dwg`). Dos PDF con el mismo nombre desde carpetas distintas se
+> pisarían entre sí: renómbralos antes.
 
 ### Opción 2: Sin arrastrar nada
 
@@ -132,13 +134,14 @@ una ventana para que selecciones la carpeta donde están tus planos PDF.
 python main.py "C:\Planos\Edificio A\planta1.pdf"
 python main.py "C:\Planos\Edificio A"          # convierte todos los PDF de la carpeta
 python main.py planta1.pdf --dpi 400            # usar más resolución
-python main.py planta1.pdf --rotar 90           # el escaneo está de lado
-python main.py planta1.pdf --ignorar-inferior 0.17  # no confundir el rótulo con muros
+python main.py planta1.pdf --rotar 90           # forzar el giro (por defecto se detecta solo)
+python main.py planta1.pdf --ignorar-inferior 0.17  # forzar el cajetín (por defecto se detecta solo)
+python main.py planta1.pdf --conservar-dxf      # guardar también el .dxf junto al .dwg
 python main.py planta1.pdf --sin-texto          # no leer textos (más rápido, ~30 s menos)
 python main.py planta1.pdf --solo-limpio        # solo MUROS y EJES, sin el calcado de referencia
 python main.py planta1.pdf --grosor-muro 1.0    # espesor de muro en mm sobre el papel (si no, se mide solo)
 python main.py planta1.pdf --modo lineas        # solo líneas rectas (modo alterno)
-python main.py planta1.pdf --no-dwg             # generar solo .dxf, sin intentar .dwg
+python main.py planta1.pdf --no-dwg             # entregar .dxf en vez de .dwg
 python main.py planta1.pdf --verbose            # ver más detalle en consola/log
 ```
 
@@ -162,15 +165,14 @@ Después de arrastrar planta-primer-piso.pdf sobre convertir.bat:
     convertir.bat
     main.py
     Convertidos_DWG/                 <- se crea aquí, no junto al PDF
-      planta-primer-piso_20261002_154715_limpio.dxf    <- solo lo reconstruido: muros, ejes, arcos, textos
-      planta-primer-piso_20261002_154715_completo.dxf  <- lo mismo + calco de referencia gris
-      (y los .dwg equivalentes si está instalado ODA File Converter)
+      planta-primer-piso.dwg         <- UN solo archivo con todo el plano en capas
+                                        (.dxf si no está instalado ODA File Converter)
 ```
 
-Un PDF de varias páginas genera un `.dxf`/`.dwg` por cada página, con el
-sufijo `_p1`, `_p2`, etc. (por ejemplo `planta-primer-piso_p2.dxf`).
+Un PDF de varias páginas genera un archivo por página, con el sufijo `_p1`,
+`_p2`, etc. (por ejemplo `planta-primer-piso_p2.dwg`).
 
-## Convertir a DWG real (opcional)
+## Convertir a DWG real
 
 1. Descarga **ODA File Converter** gratis desde el sitio oficial de la Open
    Design Alliance: https://www.opendesign.com/guestfiles/oda_file_converter
@@ -179,7 +181,7 @@ sufijo `_p1`, `_p2`, etc. (por ejemplo `planta-primer-piso_p2.dxf`).
    Firmas digitales). No uses `winget install ODA.ODAFileConverter`: a octubre de 2026 el
    paquete de winget apunta a un enlace que da error 404.
 3. Vuelve a ejecutar `convertir.bat` normalmente: el script detecta la
-   instalación automáticamente y, además del `.dxf`, dejará un `.dwg`.
+   instalación automáticamente (busca en `C:\Program Files\ODA`) y entrega el `.dwg`.
 
 > **Nota de licencia:** ODA File Converter es gratuito para uso personal y,
 > según los términos publicados por Open Design Alliance, de uso libre salvo
@@ -188,15 +190,14 @@ sufijo `_p1`, `_p2`, etc. (por ejemplo `planta-primer-piso_p2.dxf`).
 > contexto comercial y tienes dudas.
 
 Si no instalas ODA File Converter, el script sigue funcionando normalmente y
-entrega solo archivos `.dxf`, que AutoCAD abre sin ningún problema adicional.
+entrega el plano como `.dxf`, que AutoCAD abre sin ningún problema adicional.
 
 ## Estructura del proyecto
 
 ```
 planos2dwg/
 ├── main.py                 # Punto de entrada (CLI + selector de carpeta)
-├── convertir.bat           # Arrastra tus PDF aquí
-├── convertir_girado_90.bat # Igual, para escaneos que salen de lado
+├── convertir.bat           # Arrastra tus PDF aquí (hace todo solo)
 ├── instalar.bat            # Instalador de un clic
 ├── requirements.txt        # Dependencias de producción
 ├── requirements-dev.txt    # Dependencias + pytest para desarrollo
@@ -210,6 +211,7 @@ planos2dwg/
 │   ├── puertas.py          # Puertas: arco de giro de la hoja (Hough + aislamiento + bisagra en muro)
 │   ├── ventanas.py         # Ventanas: huecos alineados en las dos caras de un muro con líneas dentro
 │   ├── deskew.py           # Enderezado de escaneos inclinados
+│   ├── orientacion.py      # Giro de página y cajetín detectados solos
 │   ├── vectorizer.py       # Imagen -> calcado fiel de la tinta (OpenCV)
 │   ├── line_detector.py    # Modo alterno: imagen -> líneas rectas
 │   ├── dxf_writer.py       # Segmentos -> archivo DXF (ezdxf)
@@ -226,12 +228,19 @@ planos2dwg/
   color con fondos o tramas complejas generan más ruido.
 - No reconoce texto, cotas, símbolos ni bloques como objetos CAD: los calca
   como dibujo (se ven, pero no se pueden editar como texto o bloque).
-- Si abres un `.dxf` mientras lo vuelves a convertir, el nuevo se guarda con
-  la hora en el nombre (Windows no deja sobrescribir un archivo abierto).
+- Si el archivo de salida está abierto en AutoCAD mientras vuelves a convertir, el
+  nuevo se guarda con la hora en el nombre (Windows no deja sobrescribir un archivo
+  abierto).
+- La detección automática del giro necesita el OCR y texto legible; con un plano
+  casi sin texto puede no concluir y lo deja como viene (se puede forzar con
+  `--rotar`). El cajetín solo se detecta en la parte baja de la hoja.
+- La **escala real** no se conoce: el dibujo sale en milímetros sobre el papel del
+  escaneo, no a tamaño real. Para ponerlo a escala, mide una cota conocida en
+  AutoCAD y usa el comando `SCALE` con referencia.
 - Escaneos torcidos (sin enderezar) o de baja resolución (menos de ~200 DPI)
   producen resultados pobres; se recomienda escanear a 300–400 DPI.
-- El `.dwg` real requiere instalar ODA File Converter por separado (no se
-  incluye en este repositorio por ser una herramienta de terceros).
+- El `.dwg` requiere instalar ODA File Converter por separado (no se incluye en
+  este repositorio por ser una herramienta de terceros); sin él se entrega `.dxf`.
 - Cada página se procesa de forma independiente; no intenta alinear ni
   unir planos de varias hojas en un solo dibujo.
 

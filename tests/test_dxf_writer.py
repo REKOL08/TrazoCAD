@@ -163,3 +163,17 @@ def test_build_dxf_escribe_sanitarios_como_elipses(tmp_path: Path) -> None:
     assert elipses[0].dxf.layer == LAYER_FIXTURES
     assert abs(elipses[0].dxf.ratio - 35.0 / 59.0) < 1e-6
     assert abs(elipses[0].dxf.major_axis.x - 2.5) < 0.05  # semieje mayor de 2.5 mm
+
+
+def test_la_vista_inicial_se_centra_en_lo_reconstruido_y_no_en_el_ruido_lejano(tmp_path: Path) -> None:
+    muros = [((1000.0, 1000.0), (1600.0, 1000.0)), ((1000.0, 1200.0), (1600.0, 1200.0))]
+    ruido = [[(10.0, 10.0), (14.0, 10.0), (14.0, 14.0)]]  # mancha lejana del calco
+    salida = tmp_path / "vista.dxf"
+
+    build_dxf([], dpi=300, image_height_px=3000, output_path=salida, walls=muros, polylines=ruido)
+
+    vport = ezdxf.readfile(salida).viewports.get_config("*Active")[0]
+    centro_x = vport.dxf.center[0]
+    # los muros están en x = 1000-1600 px (84-135 mm); el ruido en 10 px (~1 mm)
+    assert 90 < centro_x < 130
+    assert vport.dxf.height < 60  # encuadre ajustado al dibujo, no a toda la extensión

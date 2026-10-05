@@ -36,8 +36,8 @@ def test_main_guarda_resultados_en_subcarpeta_del_programa(
     assert exit_code == 0
     salida_dir = programa_dir / OUTPUT_SUBFOLDER_NAME
     assert salida_dir.is_dir()
-    nombres = sorted(p.name.split("_")[-1] for p in salida_dir.glob("plano_*.dxf"))
-    assert nombres == ["completo.dxf", "limpio.dxf"]
+    # un solo archivo por plano, con el nombre del PDF
+    assert [p.name for p in salida_dir.iterdir()] == ["plano.dxf"]
     # No debe dejar nada suelto junto al PDF original.
     assert not list(entrada_dir.glob("*.dxf"))
     assert not (entrada_dir / OUTPUT_SUBFOLDER_NAME).exists()
@@ -55,22 +55,53 @@ def test_rotate_image_gira_en_sentido_antihorario() -> None:
     assert rotate_image(imagen, 180).shape == (2, 4)
 
 
-def test_cada_conversion_genera_un_archivo_nuevo_con_hora(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_entrega_un_solo_archivo_por_plano_y_lo_reemplaza(tmp_path: Path) -> None:
     from src import converter
 
     pdf_path = tmp_path / "plano.pdf"
     _crear_pdf_sintetico(pdf_path)
     salida = tmp_path / "salida"
-    marcas = iter(["20261002_100000", "20261002_100001"])
-    monkeypatch.setattr(converter, "_timestamp", lambda: next(marcas))
 
-    primero = converter.convert_pdf(pdf_path, salida, dpi=150, generate_dwg=False)
-    segundo = converter.convert_pdf(pdf_path, salida, dpi=150, generate_dwg=False)
+    primero = converter.convert_pdf(pdf_path, salida, dpi=150, generate_dwg=False, rotation=0)
+    segundo = converter.convert_pdf(pdf_path, salida, dpi=150, generate_dwg=False, rotation=0)
 
     assert primero.success and segundo.success
-    assert primero.outputs[0].name == "plano_20261002_100000_completo.dxf"
-    assert primero.outputs[1].name == "plano_20261002_100000_limpio.dxf"
-    assert segundo.outputs[0].name == "plano_20261002_100001_completo.dxf"
-    assert primero.outputs[0].exists() and segundo.outputs[0].exists()
+    assert [p.name for p in salida.iterdir()] == ["plano.dxf"]
+    assert primero.outputs == segundo.outputs == [salida / "plano.dxf"]
+
+
+def test_si_el_archivo_anterior_esta_en_uso_guarda_otro_con_la_hora(tmp_path: Path) -> None:
+    import os
+
+    from src import converter
+
+    pdf_path = tmp_path / "plano.pdf"
+    _crear_pdf_sintetico(pdf_path)
+    salida = tmp_path / "salida"
+    salida.mkdir()
+    bloqueado = salida / "plano.dxf"
+    bloqueado.write_text("abierto en AutoCAD")
+    os.chmod(bloqueado, 0o444)  # en Windows equivale a un archivo que no se puede sobrescribir
+
+    try:
+        resultado = converter.convert_pdf(pdf_path, salida, dpi=150, generate_dwg=False, rotation=0)
+    finally:
+        os.chmod(bloqueado, 0o666)
+
+    assert resultado.success
+    assert resultado.outputs[0].name != "plano.dxf"
+    assert resultado.outputs[0].name.startswith("plano_")
+    assert resultado.outputs[0].exists()
+
+
+def test_el_resumen_cuenta_lo_detectado(tmp_path: Path) -> None:
+    from src import converter
+
+    pdf_path = tmp_path / "plano.pdf"
+    _crear_pdf_sintetico(pdf_path)
+
+    resultado = converter.convert_pdf(
+        pdf_path, tmp_path / "salida", dpi=150, generate_dwg=False, rotation=0, read_text=False
+    )
+
+    assert set(resultado.summary) >= {"muros", "ejes", "arcos", "puertas", "textos"}

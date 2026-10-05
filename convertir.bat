@@ -9,6 +9,12 @@ if exist ".venv\Scripts\python.exe" (
     set "PYTHON_EXE=python"
 )
 
+echo ============================================
+echo  Convirtiendo planos a AutoCAD ...
+echo  (detecta solo si el plano esta de lado)
+echo ============================================
+echo.
+
 if "%~1"=="" (
     "%PYTHON_EXE%" main.py
 ) else (
@@ -16,4 +22,5 @@ if "%~1"=="" (
 )
 
 echo.
+if exist "Convertidos_DWG" start "" "Convertidos_DWG"
 pause

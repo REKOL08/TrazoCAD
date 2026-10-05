@@ -37,6 +37,7 @@ _MEDIUM_RADIUS_MIN_SPAN_DEG = 25.0
 _MERGE_CENTRE_MM = 0.7
 _MERGE_RADIUS_MM = 0.5
 _ITERATIONS = 1500
+_MAX_MISSES = 1
 _MAX_ARCS = 60
 
 
@@ -115,7 +116,10 @@ def detect_arcs(segments: np.ndarray, dpi: int) -> tuple[list[Arc], np.ndarray]:
 
     raw_arcs: list[Arc] = []
     available = pool.copy()
-    for _ in range(_MAX_ARCS):
+    misses = 0
+    for _ in range(2 * _MAX_ARCS):
+        if len(raw_arcs) >= _MAX_ARCS:
+            break
         ids = np.nonzero(available)[0]
         if len(ids) < 6:
             break
@@ -151,7 +155,13 @@ def detect_arcs(segments: np.ndarray, dpi: int) -> tuple[list[Arc], np.ndarray]:
             if score > best_score:
                 best_score, best_circle = score, (cx, cy, radius)
         if best_circle is None or best_score < min_total:
-            break
+            # un mal sorteo no debe cortar la búsqueda: se acepta que fallen varios
+            # intentos seguidos antes de dar por terminados los arcos
+            misses += 1
+            if misses >= _MAX_MISSES:
+                break
+            continue
+        misses = 0
 
         mask = inliers_of(*best_circle, available)
         points = np.vstack([segments[mask][:, [0, 1]], segments[mask][:, [2, 3]]])
@@ -163,6 +173,7 @@ def detect_arcs(segments: np.ndarray, dpi: int) -> tuple[list[Arc], np.ndarray]:
             available[np.nonzero(mask)[0]] = False
             continue
 
+        arcs_before = len(raw_arcs)
         cx, cy, radius = best_circle
         angles = np.sort(
             np.concatenate(
@@ -195,7 +206,10 @@ def detect_arcs(segments: np.ndarray, dpi: int) -> tuple[list[Arc], np.ndarray]:
                 if mask_length[inside].sum() / arc_length >= _MIN_COVERAGE:
                     raw_arcs.append(Arc(cx, cy, radius, float(start), float(end)))
 
-        used |= mask
+        # solo los segmentos de un arco ACEPTADO dejan de ser candidatos a muro: un
+        # candidato descartado (recta casi plana) no debe quitarle paredes al plano
+        if len(raw_arcs) > arcs_before:
+            used |= mask
         available &= ~mask
 
     arcs = _merge_concentric(raw_arcs, px_per_mm)

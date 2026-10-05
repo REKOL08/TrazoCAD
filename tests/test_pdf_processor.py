@@ -75,7 +75,7 @@ def test_avisa_si_el_escaneo_es_de_poca_resolucion(tmp_path: Path, caplog: pytes
     _pdf_con_escaneo(pdf_path, 1275, 1650)
 
     with caplog.at_level(logging.WARNING, logger="planos2dwg"):
-        convert_pdf(pdf_path, tmp_path / "salida", dpi=150, generate_dwg=False, read_text=False)
+        convert_pdf(pdf_path, tmp_path / "salida", dpi=150, generate_dwg=False, read_text=False, rotation=0)
 
     assert any("150 dpi reales" in mensaje for mensaje in caplog.messages)
 
@@ -89,6 +89,6 @@ def test_no_avisa_si_el_escaneo_es_nitido(tmp_path: Path, caplog: pytest.LogCapt
     _pdf_con_escaneo(pdf_path, 2550, 3300)  # 300 dpi
 
     with caplog.at_level(logging.WARNING, logger="planos2dwg"):
-        convert_pdf(pdf_path, tmp_path / "salida", dpi=150, generate_dwg=False, read_text=False)
+        convert_pdf(pdf_path, tmp_path / "salida", dpi=150, generate_dwg=False, read_text=False, rotation=0)
 
     assert not any("dpi reales" in mensaje for mensaje in caplog.messages)

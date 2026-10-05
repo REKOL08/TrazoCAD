@@ -101,16 +101,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--rotar",
         type=int,
         choices=VALID_ROTATIONS,
-        default=0,
-        help="Gira el plano en sentido antihorario (0, 90, 180 o 270) si el escaneo está de lado.",
+        default=None,
+        help="Gira el plano en sentido antihorario (0, 90, 180 o 270). Si se omite, se detecta solo.",
     )
     parser.add_argument(
         "--ignorar-inferior",
         type=float,
-        default=0.0,
+        default=None,
         help=(
-            "Fracción de la altura (0 a 0.5) de la franja inferior que se ignora al buscar "
-            "muros y ejes, útil para no confundir el rótulo del plano (ej. 0.17)."
+            "Fracción de la altura (0 a 0.5) de la franja inferior (el cajetín) que se ignora al "
+            "buscar muros y ejes. Si se omite, se detecta sola."
         ),
     )
     parser.add_argument(
@@ -126,6 +126,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--sin-texto",
         action="store_true",
         help="No leer los textos con OCR (más rápido; los textos quedan solo como calco).",
+    )
+    parser.add_argument(
+        "--conservar-dxf",
+        action="store_true",
+        help="Guardar también el .dxf junto al .dwg (por defecto se entrega un solo archivo por plano).",
     )
     parser.add_argument(
         "--solo-limpio",
@@ -197,11 +202,17 @@ def main(argv: list[str] | None = None) -> int:
             clean_only=args.solo_limpio,
             wall_thickness_mm=args.grosor_muro,
             read_text=not args.sin_texto,
+            keep_dxf=args.conservar_dxf,
         )
         if result.success:
             successes += 1
             for output in result.outputs:
-                logger.info("  -> generado: %s", output)
+                logger.info("  -> PLANO LISTO: %s", output)
+            if result.summary:
+                logger.info(
+                    "     Contiene: %s.",
+                    ", ".join(f"{count} {name}" for name, count in result.summary.items() if count),
+                )
         else:
             failures += 1
             logger.error("  -> FALLÓ '%s': %s", pdf_path.name, result.error)
