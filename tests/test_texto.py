@@ -56,3 +56,20 @@ def test_lee_un_texto_dibujado_en_el_plano() -> None:
     leido = next(t for t in textos if t.text == "COMEDOR")
     assert abs(leido.angle_deg) < 5
     assert 100 < leido.baseline_start[0] < 160
+
+
+def test_una_lectura_dudosa_encima_de_una_segura_se_quita() -> None:
+    import numpy as np
+
+    from src.texto import TextItem, _without_overlapped_doubts
+
+    def caja(x: float, y: float, w: float = 100, h: float = 30) -> np.ndarray:
+        return np.array([[x, y], [x + w, y], [x + w, y + h], [x, y + h]], dtype=np.float64)
+
+    segura = TextItem("ALCOBA", 0.9, caja(100, 100), True)
+    encima = TextItem("N~1.260p", 0.6, caja(110, 105, 80, 25), False)
+    aparte = TextItem("R0.95", 0.6, caja(400, 400, 60, 25), False)
+
+    resultado = _without_overlapped_doubts([segura, encima, aparte])
+
+    assert resultado == [segura, aparte]

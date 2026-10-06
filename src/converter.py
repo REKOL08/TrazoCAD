@@ -25,8 +25,8 @@ from .puertas import detect_doors
 from .ventanas import detect_windows
 from .vectorizer import binarize_ink
 from .pdf_processor import render_pdf_pages
-from .burbujas import Bubble, find_axis_bubbles, read_labels
-from .ejes import refine_axes
+from .burbujas import Bubble, find_axis_bubbles, find_loose_bubbles, read_labels
+from .ejes import complete_bubbles, radial_axes, refine_axes
 from .fotos import fuse_photos, register_photos
 from .organizar import FOLDER_PDF, FOLDER_PHOTOS, FOLDER_PLAN, FOLDER_PREVIEW, copy_unique, save_scan_preview, write_readme
 from .texto import TextItem, read_texts
@@ -180,7 +180,15 @@ def _axes_with_bubbles(image, ink, walls, axes, dpi: int, bottom: float):
     if len(bubbles) < 3:
         return axes, [], []
     labels = read_labels(image, bubbles)
-    return refine_axes(axes, bubbles, ink > 0, box), bubbles, labels
+    refined = refine_axes(axes, bubbles, ink > 0, box)
+    # las burbujas de los ejes radiales (la parte circular) y las de abajo: todas miden lo mismo que las ya vistas
+    radius = float(np.median([b.r for b in bubbles]))
+    loose = find_loose_bubbles(image, ink, radius, bubbles, max_y=image.shape[0] * (1 - bottom))
+    radial_bubbles, radial_segments, aligned = radial_axes(loose, ink > 0)
+    everyone = bubbles + aligned + radial_bubbles
+    refined, missing = complete_bubbles(refined + radial_segments, everyone, radius)
+    everyone += missing
+    return refined, everyone, labels + [""] * (len(everyone) - len(labels))
 
 
 def _anchor_points(segments: list, texts: list, bubbles: list, step: float = 25.0) -> np.ndarray:

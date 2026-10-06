@@ -107,3 +107,51 @@ def test_el_dxf_lleva_la_burbuja_como_circulo_continuo_y_la_letra(tmp_path: Path
     assert len(circulos) == 2 and all(c.dxf.layer == LAYER_AXES and c.dxf.linetype == "CONTINUOUS" for c in circulos)
     textos = list(modelspace.query("TEXT"))
     assert [t.dxf.text for t in textos] == ["A"] and textos[0].dxf.layer == LAYER_AXES
+
+
+def _plan_con_radiales() -> np.ndarray:
+    """Dos ejes radiales (burbujas con letra) que se cruzan en el centro, más un círculo con letra sin eje (una mesa)."""
+    image = np.full((1400, 1400), 255, np.uint8)
+    centro = (700, 700)
+    for letra, angulo in (("7", -70), ("9", 20), ("11", 125)):
+        rad = np.deg2rad(angulo)
+        bx, by = int(700 + 520 * np.cos(rad)), int(700 + 520 * np.sin(rad))
+        cv2.circle(image, (bx, by), RADIUS, 150, 1, cv2.LINE_AA)
+        cv2.putText(image, letra[0], (bx - 7, by + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 0, 2, cv2.LINE_AA)
+        # línea de trazo y punto desde la burbuja hasta el centro
+        for t in np.arange(RADIUS + 4, 520, 40):
+            a = (int(bx - np.cos(rad) * t), int(by - np.sin(rad) * t))
+            b = (int(bx - np.cos(rad) * min(t + 28, 520)), int(by - np.sin(rad) * min(t + 28, 520)))
+            cv2.line(image, a, b, 0, 2)
+    cv2.circle(image, (200, 200), RADIUS, 150, 1, cv2.LINE_AA)
+    cv2.putText(image, "A", (193, 208), cv2.FONT_HERSHEY_SIMPLEX, 0.7, 0, 2, cv2.LINE_AA)  # una mesa con letra: sin eje
+    return image
+
+
+def test_los_ejes_radiales_salen_de_su_burbuja_y_se_cruzan_en_el_centro() -> None:
+    from src.burbujas import find_loose_bubbles
+    from src.ejes import radial_axes
+
+    image = _plan_con_radiales()
+    ink = binarize_ink(image, DPI)
+
+    loose = find_loose_bubbles(image, ink, float(RADIUS), [])
+    bubbles, segments, aligned = radial_axes(loose, ink > 0)
+
+    assert len(bubbles) == 3 and len(segments) == 3 and not aligned  # la mesa de la esquina no es burbuja
+    for (inicio, fin), bubble in zip(segments, bubbles):
+        assert abs(fin[0] - 700) < 25 and abs(fin[1] - 700) < 25  # todos llegan al centro común
+        assert np.hypot(inicio[0] - bubble.x, inicio[1] - bubble.y) <= RADIUS + 3  # y salen del borde de su círculo
+
+
+def test_el_eje_sin_burbuja_detectada_recibe_su_circulo_alineado_con_las_demas() -> None:
+    from src.ejes import complete_bubbles
+
+    fila = [Bubble(300.0, 30.0, 20.0, "vertical"), Bubble(500.0, 34.0, 20.0, "vertical")]
+    ejes = [((300.0, 50.0), (300.0, 900.0)), ((400.0, 6.0), (400.0, 900.0)), ((700.0, 300.0), (700.0, 800.0))]
+
+    nuevos_ejes, anadidas = complete_bubbles(ejes, fila, 20.0)
+
+    assert len(anadidas) == 1 and abs(anadidas[0].x - 400.0) < 1e-6 and abs(anadidas[0].y - 32.0) < 3
+    assert nuevos_ejes[1][0][1] > 32.0  # el eje arranca en el borde del círculo, no dentro
+    assert nuevos_ejes[2] == ejes[2]  # el eje que no llega a la fila queda igual

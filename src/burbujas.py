@@ -299,3 +299,42 @@ def read_labels(gray: np.ndarray, bubbles: list[Bubble]) -> list[str]:
     for k, i in enumerate(letters):
         labels[i] = chr(start + k)
     return labels
+
+
+_LOOSE_MIN_RING = 0.66
+_LOOSE_RADIUS_SPREAD = 3
+
+
+def find_loose_bubbles(
+    gray: np.ndarray,
+    ink: np.ndarray,
+    typical_radius: float,
+    known: list[Bubble],
+    max_y: float | None = None,
+) -> list[Bubble]:
+    """Burbujas fuera de la cuadrícula (las de los ejes radiales de una parte circular, las de abajo...).
+
+    Todas las burbujas de un plano miden casi lo mismo, así que se busca solo ese radio: círculos con aro completo,
+    letra o número dentro y papel en blanco alrededor. No son burbujas de verdad hasta que sale de ellas la línea de un
+    eje (eso lo comprueba `ejes.radial_axes`): un inodoro o una mesa también cumplen lo anterior.
+    """
+    ring = _Ring(gray, ink)
+    low, high = typical_radius - _LOOSE_RADIUS_SPREAD, typical_radius + _LOOSE_RADIUS_SPREAD
+    blur = cv2.GaussianBlur(gray, (5, 5), 1.2)
+    found = cv2.HoughCircles(
+        blur, cv2.HOUGH_GRADIENT, dp=1.2, minDist=typical_radius, param1=110, param2=20, minRadius=int(low), maxRadius=int(high)
+    )
+    if found is None:
+        return []
+    kept: list[Bubble] = []
+    for x, y, _ in found[0]:
+        for r in np.arange(typical_radius - 2, typical_radius + 2.5, 1.0):
+            score = float(ring.scores(np.array([x]), np.array([y]), float(r), relaxed=False)[0])
+            if score >= _LOOSE_MIN_RING:
+                kept.append(Bubble(float(x), float(y), float(r), "radial", score))
+                break
+    result: list[Bubble] = []
+    for b in sorted(kept, key=lambda b: -b.ring):
+        if (max_y is None or b.y < max_y) and all(math.hypot(b.x - o.x, b.y - o.y) > 1.8 * typical_radius for o in known + result):
+            result.append(b)
+    return result

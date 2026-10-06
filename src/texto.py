@@ -33,6 +33,7 @@ _MIN_CONFIDENCE = 0.60
 _IOU_THRESHOLD = 0.35
 _MIN_CHARS = 1
 _CONTAINMENT = 0.6
+_DOUBT_OVERLAP = 0.15  # una lectura dudosa que se encima tanto con una segura es la misma palabra mal leída
 _BLANK_TILE_INK = 0.004
 _SURE_CONFIDENCE = 0.80
 _NUMBER = re.compile(r"^\d+[.,]\d{1,2}$")
@@ -231,6 +232,19 @@ def correct_spanish(text: str) -> tuple[str, bool]:
     return " ".join(words), changed_or_known
 
 
+def _without_overlapped_doubts(items: list[TextItem]) -> list[TextItem]:
+    """Quita las lecturas dudosas que caen sobre una lectura segura: en el plano salían una encima de la otra."""
+    sure = [t for t in items if t.sure]
+
+    def intersection_share(small: np.ndarray, big: np.ndarray) -> float:
+        sx0, sy0, sx1, sy1 = small[:, 0].min(), small[:, 1].min(), small[:, 0].max(), small[:, 1].max()
+        bx0, by0, bx1, by1 = big[:, 0].min(), big[:, 1].min(), big[:, 0].max(), big[:, 1].max()
+        width, height = min(sx1, bx1) - max(sx0, bx0), min(sy1, by1) - max(sy0, by0)
+        return (width * height) / max((sx1 - sx0) * (sy1 - sy0), 1e-9) if width > 0 and height > 0 else 0.0
+
+    return [t for t in items if t.sure or not any(intersection_share(t.quad, other.quad) >= _DOUBT_OVERLAP for other in sure)]
+
+
 def read_texts(
     image: np.ndarray,
     min_confidence: float = _MIN_CONFIDENCE,
@@ -284,6 +298,6 @@ def read_texts(
                         )
                     )
 
-    texts = _deduplicate(found)
+    texts = _without_overlapped_doubts(_deduplicate(found))
     logger.info("OCR: %d textos leídos (de %d lecturas).", len(texts), len(found))
     return texts

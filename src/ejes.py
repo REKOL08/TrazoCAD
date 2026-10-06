@@ -163,3 +163,162 @@ def refine_axes(
     extra = [seg for seg in _unmatched_in_band(axes, used, bubbles) if not any(_same_line(seg, r, 24) for r in result)]
     logger.info("Ejes: %d con burbuja y %d alineados con ellas (de %d detectados; el resto se descarta).", len(result), len(extra), len(axes))
     return result + extra
+
+
+_RAY_STEP_DEG = 0.5
+_RAY_PROBE_PX = 260  # tramo, desde la burbuja, donde se busca la línea de trazo y punto
+_RAY_MIN_SHARE = 0.30
+_RAY_MIN_LENGTH_PX = 300
+_CENTRE_PROBE_MIN_SHARE = 0.12  # hacia el centro basta menos tinta: los arcos y textos tapan buena parte de la línea
+_RAY_MAX_CENTER_MISS_PX = 60  # los ejes radiales pasan por un mismo punto: el centro de la parte circular
+
+
+def _ray_points(bubble: Bubble, angle: np.ndarray, distance: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    return bubble.x + np.cos(angle)[:, None] * distance[None, :], bubble.y + np.sin(angle)[:, None] * distance[None, :]
+
+
+def _trace_ray(ink: np.ndarray, bubble: Bubble, angle: float) -> float:
+    """Hasta dónde llega, desde el borde de la burbuja, la línea de trazo y punto que sale en `angle`."""
+    h, w = ink.shape
+    end = bubble.r
+    for distance in np.arange(bubble.r + 3, 4000, _TRACE_STEP_PX):
+        window = np.arange(distance, distance + _TRACE_WINDOW_PX, 2.0)
+        xs, ys = bubble.x + math.cos(angle) * window, bubble.y + math.sin(angle) * window
+        if not ((xs > 1) & (xs < w - 2) & (ys > 1) & (ys < h - 2)).all() or _ink_share(ink, xs, ys) < _TRACE_MIN_SHARE:
+            break
+        end = distance + _TRACE_WINDOW_PX / 2
+    return end
+
+
+_ALIGNED_DEG = 3.0  # un eje así de cerca de horizontal o vertical es de la cuadrícula, no radial
+
+
+def _is_aligned(angle: float) -> bool:
+    degrees = math.degrees(angle) % 90
+    return min(degrees, 90 - degrees) <= _ALIGNED_DEG
+
+
+def radial_axes(loose: list[Bubble], ink: np.ndarray) -> tuple[list[Bubble], list[Segment], list[Bubble]]:
+    """Confirma las burbujas sueltas por la línea de trazo y punto que sale de ellas.
+
+    Devuelve (burbujas de ejes radiales, sus ejes, burbujas de la cuadrícula). Un círculo del que no sale un eje largo
+    no es una burbuja (es un inodoro, una mesa...) y se descarta. Los ejes radiales se llevan hasta el punto donde
+    todos se cruzan (el centro de la parte circular). Una burbuja con eje horizontal o vertical es de la cuadrícula
+    (las de abajo): su eje ya existe, solo falta dibujar su círculo.
+    """
+    angles = np.deg2rad(np.arange(0.0, 360.0, _RAY_STEP_DEG))
+    radial: list[tuple[Bubble, float, float]] = []  # (burbuja, ángulo, largo)
+    aligned: list[Bubble] = []
+    for bubble in loose:
+        distance = np.arange(bubble.r + 4, bubble.r + 4 + _RAY_PROBE_PX, 2.0)
+        xs, ys = _ray_points(bubble, angles, distance)
+        shares = np.array([_ink_share(ink, xs[k], ys[k]) for k in range(len(angles))])
+        best = int(np.argmax(shares))
+        if shares[best] < _RAY_MIN_SHARE:
+            continue
+        # el ángulo exacto: el del grupo de ángulos casi tan buenos que queda más cerca del mejor
+        good = np.nonzero(shares >= shares[best] - 0.05)[0]
+        angle = float(angles[good[np.argmin(np.abs(good - best))]])
+        length = _trace_ray(ink, bubble, angle)
+        if length < _RAY_MIN_LENGTH_PX:
+            continue
+        if _is_aligned(angle):
+            aligned.append(Bubble(bubble.x, bubble.y, bubble.r, "vertical" if abs(math.sin(angle)) > 0.7 else "horizontal", bubble.ring))
+        else:
+            radial.append((bubble, angle, length))
+    if len(radial) < 2:
+        return [], [], aligned
+    # el centro común, ignorando las rectas que no pasan por él (una burbuja puede "ver" la línea de un arco, no la suya)
+    inliers = list(radial)
+    while True:
+        centre = _common_point([(b.x, b.y, a) for b, a, _ in inliers])
+        misses = [abs((centre[0] - b.x) * -math.sin(a) + (centre[1] - b.y) * math.cos(a)) for b, a, _ in inliers]
+        worst = int(np.argmax(misses))
+        if misses[worst] <= _RAY_MAX_CENTER_MISS_PX or len(inliers) <= 2:
+            break
+        inliers.pop(worst)
+    confirmed: list[Bubble] = []
+    segments: list[Segment] = []
+    for bubble, angle, length in radial:
+        miss = abs((centre[0] - bubble.x) * -math.sin(angle) + (centre[1] - bubble.y) * math.cos(angle))
+        if miss > _RAY_MAX_CENTER_MISS_PX:
+            # su línea propia no apunta al centro: se prueba directamente hacia el centro
+            angle = math.atan2(centre[1] - bubble.y, centre[0] - bubble.x)
+            distance = np.arange(bubble.r + 4, min(bubble.r + 4 + _RAY_PROBE_PX, math.hypot(centre[0] - bubble.x, centre[1] - bubble.y)), 2.0)
+            xs, ys = bubble.x + math.cos(angle) * distance, bubble.y + math.sin(angle) * distance
+            if len(distance) < 5 or _ink_share(ink, xs, ys) < _CENTRE_PROBE_MIN_SHARE:
+                continue
+        start = (bubble.x + math.cos(angle) * (bubble.r + 1), bubble.y + math.sin(angle) * (bubble.r + 1))
+        towards = (centre[0] - bubble.x) * math.cos(angle) + (centre[1] - bubble.y) * math.sin(angle) > 0
+        end = centre if towards else (bubble.x + math.cos(angle) * length, bubble.y + math.sin(angle) * length)
+        confirmed.append(bubble)
+        segments.append((start, end))
+    logger.info("Ejes radiales: %d burbujas sueltas, %d radiales, %d de la cuadrícula; centro (%d, %d).", len(loose), len(confirmed), len(aligned), *centre)
+    return confirmed, segments, aligned
+
+
+def _common_point(rays: list[tuple[float, float, float]]) -> tuple[float, float]:
+    """Punto más cercano a todas las rectas (x, y, ángulo): donde se cruzan los ejes radiales (mínimos cuadrados)."""
+    a = np.zeros((2, 2))
+    b = np.zeros(2)
+    for x, y, angle in rays:
+        n = np.array([-math.sin(angle), math.cos(angle)])  # normal a la recta
+        a += np.outer(n, n)
+        b += np.outer(n, n) @ np.array([x, y])
+    solution = np.linalg.solve(a + 1e-9 * np.eye(2), b)
+    return float(solution[0]), float(solution[1])
+
+
+_ROW_PX = 40  # burbujas con casi la misma y (o x) forman una fila (o columna)
+
+
+def _is_axis_aligned(segment: Segment) -> bool:
+    (x1, y1), (x2, y2) = segment
+    return min(abs(x2 - x1), abs(y2 - y1)) <= 0.05 * max(abs(x2 - x1), abs(y2 - y1), 1e-9)
+
+
+def _rows(bubbles: list[Bubble], direction: str) -> list[float]:
+    """Posición (y para los ejes verticales, x para los horizontales) de cada fila o columna con 2 o más burbujas."""
+    key = (lambda b: b.y) if direction == "vertical" else (lambda b: b.x)
+    values = sorted(key(b) for b in bubbles if b.direction == direction)
+    groups: list[list[float]] = []
+    for v in values:
+        if groups and v - groups[-1][0] <= _ROW_PX:
+            groups[-1].append(v)
+        else:
+            groups.append([v])
+    return [float(np.median(g)) for g in groups if len(g) >= 2]
+
+
+def complete_bubbles(axes: list[Segment], bubbles: list[Bubble], radius: float) -> tuple[list[Segment], list[Bubble]]:
+    """Pone el círculo que le falta a un eje que llega a la fila (o columna) de burbujas y no tiene la suya.
+
+    Hay burbujas de aro tan borroso que no se detectan, pero su eje sí. Si el eje termina junto a la fila de burbujas
+    de sus compañeras, se dibuja su círculo alineado con ellas y se recorta el eje hasta el borde del círculo.
+    """
+    result = list(axes)
+    added: list[Bubble] = []
+    band = _KEEP_BAND_RADII * radius + 8
+    for direction in ("vertical", "horizontal"):
+        vertical = direction == "vertical"
+        for row in _rows(bubbles, direction):
+            for index, segment in enumerate(result):
+                if not _is_axis_aligned(segment) or _is_horizontal(segment) == vertical:
+                    continue  # un eje vertical se completa con la fila de arriba o de abajo; uno horizontal, con la columna
+                coordinate = _coordinate(segment)
+                ends = sorted(segment, key=lambda p: abs((p[1] if vertical else p[0]) - row))
+                near = ends[0]
+                if abs((near[1] if vertical else near[0]) - row) > band:
+                    continue
+                if any(abs((b.x if vertical else b.y) - coordinate) <= 1.8 * radius and abs((b.y if vertical else b.x) - row) <= band
+                       for b in bubbles + added if b.direction == direction):
+                    continue  # ese eje ya tiene su burbuja
+                centre = Bubble(coordinate, row, radius, direction) if vertical else Bubble(row, coordinate, radius, direction)
+                added.append(centre)
+                far = ends[1]
+                inward = 1.0 if (far[1] if vertical else far[0]) > row else -1.0
+                trimmed = (coordinate, row + inward * (radius + 1)) if vertical else (row + inward * (radius + 1), coordinate)
+                result[index] = (trimmed, far)
+    if added:
+        logger.info("Burbujas que faltaban en su fila o columna: %d.", len(added))
+    return result, added
