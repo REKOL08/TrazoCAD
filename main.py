@@ -155,6 +155,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help=f"Carpeta donde guardar los planos; se crea si no existe (por defecto '{OUTPUT_SUBFOLDER_NAME}').",
     )
     parser.add_argument(
+        "--organizar",
+        action="store_true",
+        help="Ordenar la carpeta de resultados en subcarpetas: plano, vista previa, fotos usadas y PDF original.",
+    )
+    parser.add_argument(
         "--sin-fotos",
         action="store_true",
         help="No usar fotos de partes del plano, aunque haya en la carpeta.",
@@ -249,11 +254,16 @@ def main(argv: list[str] | None = None) -> int:
             keep_dxf=args.conservar_dxf,
             trace_visible=args.calco_visible,
             photos=photos,
+            organize=args.organizar,
         )
         if result.success:
             successes += 1
             for output in result.outputs:
                 logger.info("  -> PLANO LISTO: %s", output)
+            for preview in result.previews:
+                logger.info("  -> VISTA PREVIA: %s", preview)
+            for photo in result.photos_used:
+                logger.info("  -> FOTO USADA: %s", photo)
             if result.summary:
                 logger.info(
                     "     Contiene: %s.",

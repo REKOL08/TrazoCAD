@@ -20,6 +20,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.fotos import PHOTO_EXTENSIONS, unique_photos  # noqa: E402
+from src.organizar import FOLDER_PDF, FOLDER_PHOTOS, FOLDER_PLAN, FOLDER_PREVIEW  # noqa: E402
+from src.visor import ImageViewer  # noqa: E402
 from src.gui_logic import Event, Options, build_command, clean_folder_name, collect_pdfs, friendly_event  # noqa: E402
 from src.utils import OUTPUT_SUBFOLDER_NAME  # noqa: E402
 
@@ -80,6 +82,8 @@ class App(_BaseWindow):
         self.jobs: list[Path] = []
         self.outputs: list[Path] = []
         self.summary = ""
+        self.previews: list[Path] = []
+        self.photos_used: list[Path] = []
         self.out_dir: Path | None = None
 
         self._build_header()
@@ -240,8 +244,24 @@ class App(_BaseWindow):
         self.log.tag_configure("big", font=FONT_B, foreground=INK)
 
         self.result = tk.Frame(bottom, bg=BG)
-        self._button(self.result, "Abrir el plano", self._open_plan, primary=True).pack(side="left")
-        self._button(self.result, "Abrir la carpeta", self._open_folder, primary=False).pack(side="left", padx=8)
+        top = tk.Frame(self.result, bg=BG)
+        top.pack(fill="x")
+        self._button(top, "Abrir el plano en AutoCAD", self._open_plan, primary=True).pack(side="left")
+        self._button(top, "🔍  Ver el resultado aquí", self._open_viewer, primary=True).pack(side="left", padx=8)
+        tk.Label(self.result, text="Abrir carpeta de…", bg=BG, fg=GRAY, font=FONT_S).pack(anchor="w", pady=(8, 2))
+        self.folder_row = tk.Frame(self.result, bg=BG)
+        self.folder_row.pack(fill="x")
+        self.folder_buttons: dict[str, tk.Button] = {}
+        for key, label, sub_folder in (
+            ("plan", "📐 Plano AutoCAD", FOLDER_PLAN),
+            ("preview", "🖼 Vistas previas", FOLDER_PREVIEW),
+            ("photos", "📷 Fotos usadas", FOLDER_PHOTOS),
+            ("pdf", "📄 PDF original", FOLDER_PDF),
+            ("all", "📂 Todo", ""),
+        ):
+            button = self._button(self.folder_row, label, lambda f=sub_folder: self._open_subfolder(f), primary=False)
+            button.pack(side="left", padx=(0, 6))
+            self.folder_buttons[key] = button
 
     def _button(self, parent: tk.Widget, text: str, command, primary: bool, big: bool = False) -> tk.Button:
         return tk.Button(
@@ -402,6 +422,8 @@ class App(_BaseWindow):
             return
         self.out_dir = out_dir
         self.outputs = []
+        self.previews = []
+        self.photos_used = []
         self.summary = ""
         self._hide_result()
         self._clear_log()
@@ -472,6 +494,10 @@ class App(_BaseWindow):
     def _on_event(self, event: Event) -> None:
         if event.kind == "done":
             self.outputs.append(Path(event.text))
+        elif event.kind == "preview":
+            self.previews.append(Path(event.text))
+        elif event.kind == "photo":
+            self.photos_used.append(Path(event.text))
         elif event.kind == "summary":
             self.summary = event.text
             self._log("Contiene: " + event.text + ".")
@@ -488,8 +514,12 @@ class App(_BaseWindow):
     def _finish(self) -> None:
         self._set_busy(False)
         if self.outputs:
-            self.status.configure(text="¡Listo! Tu plano está en AutoCAD.", fg=GREEN)
-            self.result.pack(anchor="w", pady=(8, 0))
+            self.status.configure(text="¡Listo! " + (f"Contiene: {self.summary}." if self.summary else "Tu plano está en AutoCAD."), fg=GREEN)
+            self.log.pack_forget()  # el registro cede su lugar a los botones de resultados
+            assert self.out_dir is not None
+            self.folder_buttons["photos"].configure(state="normal" if (self.out_dir / FOLDER_PHOTOS).is_dir() else "disabled")
+            self.folder_buttons["preview"].configure(state="normal" if (self.out_dir / FOLDER_PREVIEW).is_dir() else "disabled")
+            self.result.pack(fill="x", pady=(8, 0))
         else:
             self.status.configure(text="No se generó ningún plano.", fg=RED)
 
@@ -546,9 +576,26 @@ class App(_BaseWindow):
         if self.outputs:
             os.startfile(self.outputs[-1])  # type: ignore[attr-defined]
 
-    def _open_folder(self) -> None:
-        if self.out_dir:
-            os.startfile(self.out_dir)  # type: ignore[attr-defined]
+    def _open_subfolder(self, name: str) -> None:
+        """Abre en el Explorador una de las carpetas de resultados ('' = la carpeta completa)."""
+        if self.out_dir is None:
+            return
+        target = self.out_dir / name if name else self.out_dir
+        if target.is_dir():
+            os.startfile(target)  # type: ignore[attr-defined]
+        else:
+            messagebox.showinfo("Planos a AutoCAD", "Esa carpeta no se creó en esta conversión (por ejemplo, no había fotos que coincidieran).")
+
+    def _open_viewer(self) -> None:
+        items: list[tuple[str, Path]] = []
+        for path in self.previews:
+            kind = "Resultado (lo que contiene el .dwg)" if path.stem.endswith("_resultado") else "Escaneo original (enderezado)"
+            items.append((f"{kind} — {path.stem.rsplit('_', 1)[0]}", path))
+        items += [(f"Foto usada — {path.name}", path) for path in self.photos_used if path.exists()]
+        if not items:
+            messagebox.showinfo("Planos a AutoCAD", "No hay vistas previas para mostrar.")
+            return
+        ImageViewer(self, items)
 
 
 def main() -> None:

@@ -28,7 +28,7 @@ class Options:
 
 @dataclass(frozen=True)
 class Event:
-    """Algo que contarle al usuario: kind = info | warn | error | done | summary."""
+    """Algo que contarle al usuario: kind = info | warn | error | done | summary | preview | photo."""
 
     kind: str
     text: str
@@ -69,7 +69,7 @@ def build_command(python: str, main_py: Path, pdf: Path, options: Options) -> li
     else:
         command.append("--sin-fotos")
     if options.output_dir is not None:
-        command += ["--salida", str(options.output_dir)]
+        command += ["--salida", str(options.output_dir), "--organizar"]
     return command
 
 
@@ -115,6 +115,9 @@ def friendly_event(line: str, seen: set[str]) -> Event | None:
                 "cotas pequeñas se leen mejor si escaneas a 300-400 dpi.",
             )
         return None
+    for marker, kind in (("VISTA PREVIA:", "preview"), ("FOTO USADA:", "photo")):
+        if marker in message:
+            return Event(kind, message.split(marker, 1)[1].strip())
     if "PLANO LISTO:" in message:
         return Event("done", message.split("PLANO LISTO:", 1)[1].strip())
     if message.strip().startswith("Contiene:"):

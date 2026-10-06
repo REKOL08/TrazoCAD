@@ -26,7 +26,9 @@ from .ventanas import detect_windows
 from .vectorizer import binarize_ink
 from .pdf_processor import render_pdf_pages
 from .fotos import merge_texts, read_photo_texts, register_photos
+from .organizar import FOLDER_PDF, FOLDER_PHOTOS, FOLDER_PLAN, FOLDER_PREVIEW, copy_unique, save_scan_preview, write_readme
 from .texto import TextItem, read_texts
+from .vista_previa import render_dxf_preview
 from .utils import ConversionError, validate_pdf
 from .vectorizer import trace_shapes
 
@@ -156,14 +158,33 @@ def _deliver(dxf_path: Path, output_dir: Path, generate_dwg: bool, keep_dxf: boo
     return [_copy_replacing(dxf_path, output_dir / dxf_path.name)]
 
 
-def _with_photo_texts(texts: list[TextItem], image, bottom: float, photos: list[Path] | None) -> list[TextItem]:
-    """Suma a los textos del escaneo los que se leen mejor en las fotos de partes del plano."""
+def _with_photo_texts(
+    texts: list[TextItem], image, bottom: float, photos: list[Path] | None
+) -> tuple[list[TextItem], list[Path]]:
+    """Suma a los textos del escaneo los que se leen mejor en las fotos de partes del plano.
+
+    Devuelve los textos y las fotos que sí coincidieron con el plano.
+    """
     if not photos:
-        return texts
+        return texts, []
     registered = register_photos(image, photos)
     if not registered:
-        return texts
-    return merge_texts(texts, read_photo_texts(registered), image.shape[:2], bottom)
+        return texts, []
+    merged = merge_texts(texts, read_photo_texts(registered), image.shape[:2], bottom)
+    return merged, [photo.path for photo in registered]
+
+
+def _make_previews(dxf_path: Path, image, preview_dir: Path, stem: str) -> list[Path]:
+    """Imagen del resultado (dibujada desde el DXF) y del escaneo enderezado. Un fallo no tumba la conversión."""
+    made: list[Path] = []
+    try:
+        result = render_dxf_preview(dxf_path, preview_dir / f"{stem}_resultado.png")
+        if result is not None:
+            made.append(result)
+        made.append(save_scan_preview(image, preview_dir / f"{stem}_escaneo.png"))
+    except Exception:
+        logger.warning("No se pudo generar la vista previa de '%s'.", stem, exc_info=True)
+    return made
 
 
 LOW_RESOLUTION_DPI = 250
@@ -186,6 +207,8 @@ class ConversionResult:
     outputs: list[Path] = field(default_factory=list)
     error: str | None = None
     summary: dict[str, int] = field(default_factory=dict)
+    previews: list[Path] = field(default_factory=list)
+    photos_used: list[Path] = field(default_factory=list)
 
 
 def convert_pdf(
@@ -203,12 +226,14 @@ def convert_pdf(
     keep_dxf: bool = False,
     trace_visible: bool = False,
     photos: list[Path] | None = None,
+    organize: bool = False,
 ) -> ConversionResult:
     """Convierte un único PDF en un archivo de AutoCAD por página (.dwg, o .dxf sin ODA).
 
     `rotation` e `ignore_bottom_fraction` en None se detectan solos (giro de página y cajetín).
     `photos`: fotos de partes del plano; las que coinciden con él se usan para leer mejor los
     textos y las cotas (las que no, se ignoran).
+    `organize`: ordena `output_dir` en subcarpetas (plano, vista previa, fotos usadas, PDF original).
 
     No lanza excepciones hacia el llamador: cualquier error se captura y se
     devuelve dentro de ConversionResult para que un lote de PDFs pueda
@@ -220,7 +245,10 @@ def convert_pdf(
         pages = render_pdf_pages(pdf_path, dpi=dpi)
 
         outputs: list[Path] = []
+        previews: list[Path] = []
+        photos_used: list[Path] = []
         summary: dict[str, int] = {}
+        plan_dir = output_dir / FOLDER_PLAN if organize else output_dir
         for page in pages:
             _warn_if_low_resolution(pdf_path.name, page.native_dpi)
             page_rotation = detect_rotation(page.image, page.dpi) if rotation is None else rotation
@@ -257,7 +285,8 @@ def convert_pdf(
                 )
                 if read_text:
                     texts = read_texts(image, ignore_bottom_fraction=bottom)
-                    texts = _with_photo_texts(texts, image, bottom, photos)
+                    texts, used = _with_photo_texts(texts, image, bottom, photos)
+                    photos_used.extend(p for p in used if p not in photos_used)
                 fixtures = detect_fixtures(image, page.dpi, texts, wall_thickness_px=thickness)
                 explained = (
                     list(walls)
@@ -303,7 +332,9 @@ def convert_pdf(
                     detail=detail,
                     trace_visible=trace_visible,
                 )
-                outputs.extend(_deliver(dxf_path, output_dir, generate_dwg, keep_dxf))
+                outputs.extend(_deliver(dxf_path, plan_dir, generate_dwg, keep_dxf))
+                if organize:
+                    previews.extend(_make_previews(dxf_path, image, output_dir / FOLDER_PREVIEW, f"{pdf_path.stem}{suffix}"))
             for key, items in (
                 ("muros", walls), ("ejes", axes), ("arcos", arcs), ("puertas", doors),
                 ("ventanas", windows), ("sanitarios", fixtures), ("textos", texts), ("lineas de detalle", detail),
@@ -317,7 +348,15 @@ def convert_pdf(
                 error="No se detectó ninguna línea en el PDF; revisa la calidad del escaneo.",
             )
 
-        return ConversionResult(pdf_path=pdf_path, success=True, outputs=outputs, summary=summary)
+        if organize:
+            copy_unique(pdf_path, output_dir / FOLDER_PDF)
+            kept = [copy_unique(p, output_dir / FOLDER_PHOTOS) for p in photos_used]
+            write_readme(output_dir, pdf_path.name, summary, len(kept))
+            photos_used = kept
+
+        return ConversionResult(
+            pdf_path=pdf_path, success=True, outputs=outputs, summary=summary, previews=previews, photos_used=photos_used
+        )
 
     except ConversionError as exc:
         logger.error("'%s': %s", pdf_path.name, exc)

@@ -26,7 +26,27 @@ Una ventana normal de programa, con su logo, en cuatro pasos:
    del plano (automático, 90°, 180°, 270°).
 
 Después **Convertir a AutoCAD**: aparece el avance paso a paso (con **Detener** si te equivocaste) y
-al final **Abrir el plano** y **Abrir la carpeta**. Por dentro ejecuta el mismo `main.py` en un proceso
+al final los botones de resultados:
+
+- **Abrir el plano en AutoCAD** y **🔍 Ver el resultado aquí**: un visor dentro del programa (rueda =
+  zoom, arrastrar = mover, doble clic = ajustar) para ver *lo que contiene el .dwg*, el escaneo
+  original enderezado y las fotos usadas, sin abrir AutoCAD.
+- **Abrir carpeta de…**: un botón por cada carpeta de resultados (ver abajo).
+
+### Carpeta de resultados ordenada
+
+Todo lo que se genera queda organizado dentro de la carpeta que nombraste:
+
+```
+Casa Prueba 1/
+├── 1_Plano_AutoCAD/   el .dwg (y el .dxf si lo pediste)
+├── 2_Vista_previa/    imagen del resultado y del escaneo (PNG)
+├── 3_Fotos_usadas/    las fotos que sí coincidieron con el plano
+├── 4_PDF_original/    copia del PDF que se convirtió
+└── LEEME.txt          qué hay en cada carpeta y qué contiene cada plano
+```
+
+Desde la línea de comandos se activa con `--organizar` junto a `--salida`. Por dentro ejecuta el mismo `main.py` en un proceso
 aparte, así que el resultado es idéntico al de la línea de comandos.
 
 **Acceso directo con logo:** `crear_acceso_directo.bat` lo crea en tu escritorio («Planos a AutoCAD»).
@@ -124,6 +144,7 @@ python main.py planta1.pdf --fotos MIS_FOTOS    # carpeta con fotos de partes de
 python main.py planta1.pdf --sin-fotos          # ignorar las fotos aunque haya en la carpeta
 python main.py planta1.pdf --foto a.jpg --foto b.jpg   # usar solo estas fotos
 python main.py planta1.pdf --salida "C:\Planos\Casa 1"  # carpeta de resultados (se crea)
+python main.py planta1.pdf --salida "C:\Planos\Casa 1" --organizar  # ...con subcarpetas, vista previa y copia del PDF
 python main.py planta1.pdf --solo-limpio        # sin el relleno del escaneo en el archivo (más pequeño)
 python main.py planta1.pdf --grosor-muro 1.0    # espesor de muro en mm sobre el papel (si no, se mide solo)
 python main.py planta1.pdf --modo lineas        # solo líneas rectas (modo alterno)
@@ -230,6 +251,9 @@ planos2dwg/
 │   ├── deskew.py           # Enderezado de escaneos inclinados
 │   ├── orientacion.py      # Giro de página y cajetín detectados solos
 │   ├── gui_logic.py        # Lógica de la ventana: comando, nombres de carpeta y mensajes (probada)
+│   ├── organizar.py        # Carpeta de resultados ordenada (plano, vista previa, fotos, PDF original)
+│   ├── vista_previa.py     # Dibuja el DXF en un PNG para verlo sin AutoCAD
+│   ├── visor.py            # Visor de imágenes con zoom dentro del programa
 │   ├── fotos.py            # Alinea fotos de partes del plano y suma los textos/cotas que se leen mejor en ellas
 │   ├── detalle.py          # Trazos de detalle de un solo trazo (esqueleto) de lo que no es muro/eje/arco/texto
 │   ├── centerline.py       # Adelgazado de la tinta a su línea central y recorrido del grafo
