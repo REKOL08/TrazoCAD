@@ -53,6 +53,49 @@ aparte, así que el resultado es idéntico al de la línea de comandos.
 También puedes abrir el programa con `abrir_app.bat`. El logo se regenera con `assets/hacer_logo.py`
 (necesita Pillow, solo para eso).
 
+## ⚠️ Qué hace y qué NO hace esta herramienta (leer antes de usar)
+
+Cada plano se entrega como **un solo archivo** (`nombre-del-pdf.dwg`) con estas **capas**. Lo reconstruido va en capas propias, con líneas rectas y de un solo trazo (sin el temblor del escaneo) y una jerarquía de grosores de línea (muros 0,35 mm, detalle 0,09 mm...). **Todo el plano se dibuja como líneas**, no como manchas: lo que se reconoce (muros, ejes, arcos, puertas, ventanas, sanitarios, textos) va en capas propias y de colores, y el resto del dibujo (escaleras, mobiliario, cotas, curvas, rayados) se rehace como líneas finas de un solo trazo en la capa `DETALLE`. El escaneo va además dentro del archivo, **apagado**, como relleno gris de comparación. El archivo se abre ya centrado en el dibujo:
+
+| Capa | Qué contiene | Calidad |
+|---|---|---|
+| `MUROS` | Caras de muros como líneas **rectas, paralelas y enderezadas** (horizontal/vertical exactas), con esquinas prolongadas hasta cruzarse y los extremos libres cerrados con un remate | Limpia, pero **parcial**: faltan tramos. Se descartan las filas de cotas (otra separación entre líneas) y los contornos cortos aislados como muebles |
+| `PUERTAS` | El arco de giro de cada puerta y su hoja (si está dibujada), en amarillo | Detecta las puertas de arco fino con bisagra sobre un muro; en el plano de prueba encontró 6 de ~10 con las fotos fusionadas (4 sin ellas), así que **faltan puertas**. La hoja solo aparece si está dibujada con un trazo claro |
+| `SANITARIOS` | Inodoros y lavamanos como **elipses limpias** de CAD (magenta), buscadas solo dentro de los baños | Aproximada: solo en cuartos etiquetados BAÑO, elipses con tamaño razonable respecto al muro; sin catálogo de bloques ni forma real de la taza, y no reconoce camas, sofás ni cocinas |
+| `VENTANAS` | Huecos en un muro con líneas finas dentro: las tres líneas (cara, centro, cara) y sus jambas, en celeste | **No funciona en planos como el de prueba**: allí las líneas de la ventana continúan las caras del muro (no hay hueco que detectar) y se encontraron 0 de unas 15 ventanas exteriores. Solo sirve cuando la ventana interrumpe las caras del muro. Requiere un modelo de visión (pendiente) |
+| `ARCOS` | Arcos y círculos reales (`ARC`/`CIRCLE`): muros curvos, puertas batientes, escaleras circulares | Buena en curvas grandes; puede haber algún arco falso o faltar uno |
+| `EJES` | Los ejes de la cuadrícula **validados con su burbuja** (el círculo con la letra o el número): una recta por burbuja, saliendo de su círculo (tipo de línea `CENTER`). Las líneas largas sin burbuja (cotas, líneas dentro de un cuarto, la línea de corte A-A') se descartan. Las burbujas van como `CIRCLE` continuo y, si se leyó, con su letra como `TEXT` | Buena en la cuadrícula del plano de prueba: 11 ejes horizontales A-K con su letra y 7 verticales. Los **números** de las filas no se leen (el círculo sale sin texto), las burbujas de aro muy borroso no se detectan y faltan los ejes radiales de la parte circular |
+| `TEXTOS` | Los nombres de espacios y las cifras leídos con OCR, como **texto de AutoCAD editable** (se pueden corregir con doble clic), en azul | Buena en nombres (SALON SOCIAL, COCINA, ACCESO...); se corrigen confusiones típicas con un vocabulario de planos (BARO -> BAÑO) |
+| `COTAS` | Solo las **cifras** de las cotas (2.05, 0.90...) que el OCR leyó con seguridad, en verde, separadas de los nombres de los espacios | **Incompleta**: con un escaneo de 150 dpi solo se leen 8 cifras; **con fotos de partes del plano fusionadas, 62**. No se generan cotas de CAD (`DIMENSION`): son texto |
+| `TEXTOS_REVISAR` | Lecturas dudosas (poca confianza, no reconocidas en el vocabulario) en naranja | Hay que revisarlas a mano; su dibujo original sigue en `CALCADO_REFERENCIA` para comparar |
+| `DETALLE` | Todo lo que no es muro, eje, arco, puerta, ventana, sanitario ni texto leído (escaleras, contornos de mobiliario, cotas, curvas, rayados): se borra de la tinta lo ya reconstruido, lo que queda se **adelgaza a su línea central**, se recorre como grafo, se simplifica (0,14 mm), se endereza a horizontal/vertical y se unen los tramos continuos. Las **rayas cortas de las líneas discontinuas** (trazos, trazo y punto) se conservan como rayas sueltas. Rectas como `LINE`, curvas como polilíneas. En blanco y con grosor fino (0,13 mm) | Recoge casi todo el detalle como **líneas finas de un solo trazo**, pero con la resolución de un escaneo de 150 dpi algunas líneas salen con pequeños quiebres, las curvas son polilíneas (no arcos exactos) y las letras que el OCR no leyó pueden aparecer como trazos sueltos |
+| `CALCADO_REFERENCIA` | La tinta del escaneo como **relleno sólido gris** (una mancha por trazo, con sus agujeros). Va **apagada** | Solo para comparar con el escaneo original; hereda los bordes irregulares del JPEG. Se enciende desde el administrador de capas o con `--calco-visible` al convertir |
+
+- **No son objetos CAD "inteligentes"**: no hay cotas (`DIMENSION`) ni muebles como bloques (solo sanitarios como elipses),
+  y las puertas y ventanas son solo geometría (no bloques con sus atributos), y los muros no tienen relleno ni espesor como objeto.
+  Los textos sí son `TEXT` editable si instalaste el OCR (ver abajo); sin él
+  quedan solo como calco.
+  La salida es una **base para que un dibujante redibuje**, no un plano
+  terminado.
+- Modo `lineas` (`--modo lineas`): solo líneas rectas sueltas, sin muros ni
+  textos. Más limpio pero muy incompleto; no se recomienda.
+- **El giro y el cajetín se detectan solos.** Si el escaneo viene de lado (como el
+  del plano de prueba), se lee el texto en las cuatro orientaciones y se elige la
+  que reconoce más palabras de plano (necesita el OCR; sin él no se gira). El
+  recuadro de datos del plano (cajetín) se localiza como una pila de líneas largas
+  en la parte baja y se ignora al buscar muros. Si se equivoca, puedes forzarlo con
+  `--rotar 0|90|180|270` y `--ignorar-inferior 0.17`. Un escaneo ligeramente
+  inclinado también se **endereza** solo.
+- La fidelidad depende de la calidad del escaneo. Escanea a 300-400 DPI en
+  blanco y negro o gris.
+- **El `.dwg` lo escribe ODA File Converter.** Ninguna librería libre de Python
+  escribe `.dwg` (es un formato propietario de Autodesk): el programa construye un
+  DXF y lo convierte con ODA File Converter (ver
+  [instalación](#convertir-a-dwg-real)). **Sin ODA instalado se entrega el mismo
+  plano como `.dxf`**, que AutoCAD abre igual. En ambos casos el archivo es único.
+- Si ya tienes el **DWG original** del plano, eso siempre dará mejor
+  resultado que cualquier conversión desde un escaneo.
+
 ## Requisitos del sistema
 
 - Windows 10 u 11.
@@ -253,6 +296,8 @@ TrazoCAD/
 │   ├── organizar.py        # Carpeta de resultados ordenada (plano, vista previa, fotos, PDF original)
 │   ├── vista_previa.py     # Dibuja el DXF en un PNG para verlo sin AutoCAD
 │   ├── visor.py            # Visor de imágenes con zoom dentro del programa
+│   ├── burbujas.py         # Burbujas de los ejes (círculos con letra/número) y lectura de sus letras
+│   ├── ejes.py             # Un eje recto por burbuja; descarta las líneas largas que no son ejes
 │   ├── fotos.py            # Alinea fotos de partes del plano y suma los textos/cotas que se leen mejor en ellas
 │   ├── detalle.py          # Trazos de detalle de un solo trazo (esqueleto) de lo que no es muro/eje/arco/texto
 │   ├── centerline.py       # Adelgazado de la tinta a su línea central y recorrido del grafo

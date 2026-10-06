@@ -121,6 +121,7 @@ def build_dxf(
     detail: list[Stroke] | None = None,
     trace_visible: bool = False,
     shapes: list[Shape] | None = None,
+    axis_bubbles: list[tuple[float, float, float, str]] | None = None,
 ) -> Path:
     """Escribe `segments` y `polylines` (en píxeles) en un DXF nuevo.
 
@@ -199,6 +200,15 @@ def build_dxf(
 
     for (x1, y1), (x2, y2) in axes:
         modelspace.add_line(to_mm(x1, y1), to_mm(x2, y2), dxfattribs={"layer": LAYER_AXES})
+
+    # burbujas de los ejes: círculo continuo (no de trazo y punto) y, si se leyó, la letra centrada
+    for bx, by, br, label in axis_bubbles or []:
+        centre = to_mm(bx, by)
+        radius = _px_to_mm(br, dpi)
+        modelspace.add_circle(centre, radius, dxfattribs={"layer": LAYER_AXES, "linetype": "CONTINUOUS"})
+        if label:
+            text = modelspace.add_text(label, height=radius * 1.15, dxfattribs={"layer": LAYER_AXES, "style": TEXT_STYLE})
+            text.set_placement(centre, align=TextEntityAlignment.MIDDLE_CENTER)
 
     for arc in arcs:
         centre = to_mm(arc.cx, arc.cy)

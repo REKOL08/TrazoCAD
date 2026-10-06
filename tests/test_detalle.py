@@ -87,3 +87,45 @@ def test_una_mota_aislada_sigue_siendo_ruido() -> None:
     image = _imagen(lambda im: cv2.line(im, (300, 300), (307, 300), 0, 3))
 
     assert detect_detail_strokes(image, DPI, explained=[], texts=[]) == []
+
+
+def test_los_restos_lejos_de_lo_reconocido_se_quitan_y_el_detalle_cercano_se_queda() -> None:
+    import numpy as np
+
+    from src.centerline import Stroke
+    from src.detalle import drop_debris
+
+    anclas = np.array([[1000.0, 1000.0], [1100.0, 1000.0]])  # un muro reconocido
+    cerca = Stroke([(1050.0, 1040.0), (1090.0, 1040.0)])  # una cota junto al muro
+    sello = Stroke([(2400.0, 200.0), (2450.0, 200.0)])  # trazo corto lejos de todo
+    largo_lejos = Stroke([(700.0, 1500.0), (2600.0, 1500.0)])  # largo (>100 mm): no es un resto, se conserva
+
+    resultado = drop_debris([cerca, sello, largo_lejos], anclas, DPI, (2550, 3300))
+
+    assert cerca in resultado and sello not in resultado and largo_lejos in resultado
+
+
+def test_el_marco_de_la_hoja_se_quita() -> None:
+    import numpy as np
+
+    from src.centerline import Stroke
+    from src.detalle import drop_debris
+
+    marco = Stroke([(60.0, 50.0), (60.0, 2400.0)])  # línea larga pegada al borde izquierdo
+    muro_borde = Stroke([(60.0, 500.0), (60.0, 560.0)])  # corta: no es el marco
+    anclas = np.array([[60.0, 520.0]])
+
+    resultado = drop_debris([marco, muro_borde], anclas, DPI, (2550, 3300))
+
+    assert marco not in resultado and muro_borde in resultado
+
+
+def test_sin_anclas_solo_se_quita_el_marco() -> None:
+    import numpy as np
+
+    from src.centerline import Stroke
+    from src.detalle import drop_debris
+
+    trazo = Stroke([(1000.0, 1000.0), (1040.0, 1000.0)])
+
+    assert drop_debris([trazo], np.empty((0, 2)), DPI, (2550, 3300)) == [trazo]

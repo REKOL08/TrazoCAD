@@ -38,6 +38,10 @@ _DASH_NEIGHBOUR_MM = 3.0
 _DASH_MIN_NEIGHBOURS = 2
 _JOIN_TOLERANCE_MM = 0.25
 _JOIN_MIN_COSINE = math.cos(math.radians(35))
+_DEBRIS_FAR_MM = 30.0  # un trazo corto a más de esto de todo lo reconocido (muros, ejes, textos...) es un resto suelto
+_DEBRIS_MAX_MM = 100.0
+_FRAME_EDGE_FRACTION = 0.06  # el marco de la hoja: una línea larga pegada al borde
+_FRAME_MIN_FRACTION = 0.4
 
 
 def _snap_orthogonal(points: list[tuple[float, float]], min_length_px: float) -> list[tuple[float, float]]:
@@ -219,3 +223,42 @@ def detect_detail_strokes(
 
     logger.info("Detalle: %d trazos de un solo trazo (%d rectos, %d rayas de líneas discontinuas).", len(result), len(merged), len(dashes))
     return result
+
+
+def _stroke_length(stroke: Stroke) -> float:
+    pts = stroke.points
+    return sum(math.dist(pts[i], pts[i + 1]) for i in range(len(pts) - 1))
+
+
+def drop_debris(strokes: list[Stroke], anchors: np.ndarray, dpi: int, image_shape: tuple[int, int]) -> list[Stroke]:
+    """Quita los restos sueltos del escaneo: el marco de la hoja y los trazos cortos lejos de todo lo reconocido.
+
+    `anchors` son puntos (x, y) de lo ya reconocido: muros, ejes, puertas, textos... Un detalle legítimo (una cota,
+    una escalera, una proyección de cubierta) queda cerca de ellos; un sello de la hoja, una mancha o un trozo de
+    marco no.
+    """
+    if not strokes:
+        return strokes
+    px_per_mm = dpi / _MM_PER_INCH
+    far_px, max_px = _DEBRIS_FAR_MM * px_per_mm, _DEBRIS_MAX_MM * px_per_mm
+    height, width = image_shape
+    edge_x, edge_y = _FRAME_EDGE_FRACTION * width, _FRAME_EDGE_FRACTION * height
+    kept: list[Stroke] = []
+    dropped_frame = dropped_far = 0
+    for stroke in strokes:
+        xs = [p[0] for p in stroke.points]
+        ys = [p[1] for p in stroke.points]
+        span_x, span_y = max(xs) - min(xs), max(ys) - min(ys)
+        near_edge = min(xs) < edge_x or max(xs) > width - edge_x or min(ys) < edge_y or max(ys) > height - edge_y
+        if near_edge and (span_y >= _FRAME_MIN_FRACTION * height or span_x >= _FRAME_MIN_FRACTION * width):
+            dropped_frame += 1
+            continue
+        if len(anchors) and _stroke_length(stroke) < max_px:
+            points = np.array(stroke.points, dtype=np.float64)
+            nearest = np.sqrt(((points[:, None, :] - anchors[None, :, :]) ** 2).sum(axis=2)).min()
+            if nearest > far_px:
+                dropped_far += 1
+                continue
+        kept.append(stroke)
+    logger.info("Detalle: %d restos quitados (%d del marco de la hoja, %d sueltos lejos del plano).", dropped_frame + dropped_far, dropped_frame, dropped_far)
+    return kept

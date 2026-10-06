@@ -15,7 +15,7 @@ import numpy as np
 
 from .dwg_converter import convert_dxf_to_dwg
 from .deskew import deskew
-from .detalle import detect_detail_strokes
+from .detalle import detect_detail_strokes, drop_debris
 from .dxf_writer import build_dxf
 from .line_detector import detect_lines, filter_short_segments, merge_collinear_segments
 from .muebles import detect_fixtures
@@ -25,6 +25,8 @@ from .puertas import detect_doors
 from .ventanas import detect_windows
 from .vectorizer import binarize_ink
 from .pdf_processor import render_pdf_pages
+from .burbujas import Bubble, find_axis_bubbles, read_labels
+from .ejes import refine_axes
 from .fotos import fuse_photos, register_photos
 from .organizar import FOLDER_PDF, FOLDER_PHOTOS, FOLDER_PLAN, FOLDER_PREVIEW, copy_unique, save_scan_preview, write_readme
 from .texto import TextItem, read_texts
@@ -158,6 +160,40 @@ def _deliver(dxf_path: Path, output_dir: Path, generate_dwg: bool, keep_dxf: boo
     return [_copy_replacing(dxf_path, output_dir / dxf_path.name)]
 
 
+def _bubble_outline(bubble: Bubble, sides: int = 24) -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    """El aro de una burbuja como segmentos, para quitarlo del detalle (ya se dibuja como círculo)."""
+    points = [
+        (bubble.x + bubble.r * math.cos(2 * math.pi * k / sides), bubble.y + bubble.r * math.sin(2 * math.pi * k / sides))
+        for k in range(sides + 1)
+    ]
+    return list(zip(points, points[1:]))
+
+
+def _axes_with_bubbles(image, ink, walls, axes, dpi: int, bottom: float):
+    """Valida los ejes con sus burbujas: descarta los falsos y completa los que faltaban."""
+    if not walls or not axes:
+        return axes, [], []
+    xs = [p[0] for wall in walls for p in wall]
+    ys = [p[1] for wall in walls for p in wall]
+    box = (min(xs), min(ys), max(xs), max(ys))
+    bubbles = find_axis_bubbles(image, ink, axes, dpi, box, max_y=image.shape[0] * (1 - bottom))
+    if len(bubbles) < 3:
+        return axes, [], []
+    labels = read_labels(image, bubbles)
+    return refine_axes(axes, bubbles, ink > 0, box), bubbles, labels
+
+
+def _anchor_points(segments: list, texts: list, bubbles: list, step: float = 25.0) -> np.ndarray:
+    """Puntos que representan lo ya reconocido (segmentos muestreados, centros de texto y de burbuja)."""
+    points: list[tuple[float, float]] = []
+    for (x1, y1), (x2, y2) in segments:
+        n = max(int(math.hypot(x2 - x1, y2 - y1) // step), 1)
+        points.extend((x1 + (x2 - x1) * k / n, y1 + (y2 - y1) * k / n) for k in range(n + 1))
+    points.extend((float(t.quad[:, 0].mean()), float(t.quad[:, 1].mean())) for t in texts)
+    points.extend((b.x, b.y) for b in bubbles)
+    return np.array(points, dtype=np.float64).reshape(-1, 2)
+
+
 def _make_previews(dxf_path: Path, image, preview_dir: Path, stem: str) -> list[Path]:
     """Imagen del resultado (dibujada desde el DXF) y del escaneo enderezado. Un fallo no tumba la conversión."""
     made: list[Path] = []
@@ -253,6 +289,8 @@ def convert_pdf(
             windows: list = []
             fixtures: list = []
             detail: list = []
+            bubbles: list = []
+            bubble_labels: list = []
             if mode == MODE_LINES:
                 segments = detect_lines(image)
                 segments = merge_collinear_segments(segments, dpi=page.dpi)
@@ -266,11 +304,11 @@ def convert_pdf(
                     ignore_bottom_fraction=bottom,
                     wall_thickness_mm=wall_thickness_mm,
                 )
+                ink = binarize_ink(image, page.dpi)
+                axes, bubbles, bubble_labels = _axes_with_bubbles(image, ink, walls, axes, page.dpi, bottom)
                 doors = detect_doors(image, page.dpi, wall_thickness_px=thickness)
                 arcs = _without_door_arcs(arcs, doors, tol_px=1.5 * (thickness or page.dpi / 25.4))
-                windows = detect_windows(
-                    walls, binarize_ink(image, page.dpi), page.dpi, thickness or page.dpi / 25.4
-                )
+                windows = detect_windows(walls, ink, page.dpi, thickness or page.dpi / 25.4)
                 if read_text:
                     texts = read_texts(image, ignore_bottom_fraction=bottom)
                 fixtures = detect_fixtures(image, page.dpi, texts, wall_thickness_px=thickness)
@@ -281,8 +319,16 @@ def convert_pdf(
                     + _door_segments(doors)
                     + [line for window in windows for line in window.lines]
                     + [seg for f in fixtures for seg in zip(f.outline(), f.outline()[1:])]
+                    + [seg for b in bubbles for seg in _bubble_outline(b)]
                 )
-                detail = detect_detail_strokes(image, page.dpi, explained, texts, ignore_bottom_fraction=bottom)
+                # la letra de una burbuja leída se escribe como texto: se borra del detalle para no repetirla
+                label_boxes = [
+                    TextItem(label, 1.0, np.array([[b.x - 0.6 * b.r, b.y - 0.6 * b.r], [b.x + 0.6 * b.r, b.y - 0.6 * b.r], [b.x + 0.6 * b.r, b.y + 0.6 * b.r], [b.x - 0.6 * b.r, b.y + 0.6 * b.r]]), True)
+                    for b, label in zip(bubbles, bubble_labels)
+                    if label
+                ]
+                detail = detect_detail_strokes(image, page.dpi, explained, texts + label_boxes, ignore_bottom_fraction=bottom)
+                detail = drop_debris(detail, _anchor_points(explained, texts, bubbles), page.dpi, image.shape[:2])
                 if not clean_only:
                     shapes = _without_read_letters(trace_shapes(image, dpi=page.dpi), texts)
                     before = len(shapes)
@@ -317,13 +363,14 @@ def convert_pdf(
                     fixtures=fixtures,
                     detail=detail,
                     trace_visible=trace_visible,
+                    axis_bubbles=[(b.x, b.y, b.r, label) for b, label in zip(bubbles, bubble_labels)],
                 )
                 outputs.extend(_deliver(dxf_path, plan_dir, generate_dwg, keep_dxf))
                 if organize:
                     previews.extend(_make_previews(dxf_path, image, output_dir / FOLDER_PREVIEW, f"{pdf_path.stem}{suffix}"))
             for key, items in (
                 ("muros", walls), ("ejes", axes), ("arcos", arcs), ("puertas", doors),
-                ("ventanas", windows), ("sanitarios", fixtures), ("textos", texts), ("lineas de detalle", detail),
+                ("ventanas", windows), ("sanitarios", fixtures), ("burbujas de eje", bubbles), ("textos", texts), ("lineas de detalle", detail),
             ):
                 summary[key] = summary.get(key, 0) + len(items)
 
