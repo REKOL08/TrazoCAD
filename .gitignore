@@ -40,3 +40,4 @@ Convertidos_DWG/
 # Planos de prueba del usuario (confidenciales): solo se versiona el LEEME
 planos_de_prueba/*
 !planos_de_prueba/LEEME.txt
+ESTADO-DEL-PROYECTO.md
