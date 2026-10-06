@@ -1,7 +1,7 @@
-"""Planos a AutoCAD: ventana de chat. Arrastra un PDF y te devuelve el .dwg.
+"""Planos a AutoCAD: programa de escritorio. Arrastra el PDF y se transforma en un .dwg.
 
-Se abre con `abrir_app.bat` (doble clic). Las opciones son fichas rápidas sobre la barra de abajo.
-El trabajo lo hace `main.py` en un proceso aparte, para poder detenerlo sin cerrar la ventana.
+Se abre con el acceso directo del escritorio o con `abrir_app.bat`. El trabajo lo hace `main.py` en
+un proceso aparte, para poder detenerlo sin cerrar la ventana.
 """
 
 from __future__ import annotations
@@ -14,15 +14,16 @@ import threading
 import time
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, font as tkfont, ttk
+from tkinter import filedialog, messagebox, ttk
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.gui_logic import ROTATIONS, Event, Options, build_command, collect_pdfs, friendly_event  # noqa: E402
-from src.utils import OUTPUT_SUBFOLDER_NAME, PHOTOS_SUBFOLDER_NAME  # noqa: E402
+from src.fotos import PHOTO_EXTENSIONS, unique_photos  # noqa: E402
+from src.gui_logic import Event, Options, build_command, clean_folder_name, collect_pdfs, friendly_event  # noqa: E402
+from src.utils import OUTPUT_SUBFOLDER_NAME  # noqa: E402
 
-try:  # arrastrar y soltar es opcional: sin esta librería queda el botón del clip
+try:  # arrastrar y soltar es opcional: sin esta librería queda el clic para buscar el archivo
     from tkinterdnd2 import DND_FILES, TkinterDnD
 
     _BaseWindow = TkinterDnD.Tk
@@ -31,311 +32,401 @@ except Exception:  # pragma: no cover - depende de la instalación
     _BaseWindow = tk.Tk
     HAS_DND = False
 
-# Colores al estilo de los primeros chats: barra azul, fondo claro, burbujas simples.
-BLUE = "#3b78d8"
-BLUE_DARK = "#2d62b8"
-BG = "#e8edf3"
-BUBBLE_BOT = "#ffffff"
-BUBBLE_BOT_LINE = "#d3dae3"
-BUBBLE_ME = "#4a8cf0"
-TEXT_DARK = "#26313d"
-TEXT_GRAY = "#8794a3"
-CHIP_ON = "#dbe9ff"
-CHIP_OFF = "#f4f6f9"
-GREEN = "#3fbf5f"
-WIDTH = 440
-MAX_BUBBLE = 300
+ASSETS = PROJECT_ROOT / "assets"
+APP_ID = "Planos2DWG.Convertidor"
+
+NAVY = "#0d3b8e"
+BLUE = "#1f6feb"
+BLUE_DARK = "#1658bf"
+BG = "#f2f5fa"
+CARD = "#ffffff"
+LINE = "#d6deea"
+INK = "#1f2a3a"
+GRAY = "#6b7a90"
+ZONE = "#eaf2ff"
+ZONE_HOT = "#d3e5ff"
+GREEN = "#1e9e55"
+RED = "#d64545"
+ROTATIONS = {"Automático": "auto", "Girar 90°": "90", "Girar 180°": "180", "Girar 270°": "270"}
+FONT = ("Segoe UI", 10)
+FONT_B = ("Segoe UI", 10, "bold")
+FONT_S = ("Segoe UI", 9)
 
 
-class ChatApp(_BaseWindow):
+class App(_BaseWindow):
     def __init__(self) -> None:
         super().__init__()
         self.title("Planos a AutoCAD")
-        height = max(520, min(720, self.winfo_screenheight() - 120))
-        self.geometry(f"{WIDTH}x{height}+60+20")
-        self.minsize(WIDTH, 520)
-        self.maxsize(WIDTH + 140, 1200)
         self.configure(bg=BG)
+        self.minsize(820, 600)
+        self.geometry(f"880x{min(700, max(600, self.winfo_screenheight() - 80))}+80+10")
+        self._set_icon()
 
-        self.font = tkfont.Font(family="Segoe UI", size=10)
-        self.font_bold = tkfont.Font(family="Segoe UI", size=10, weight="bold")
-        self.font_small = tkfont.Font(family="Segoe UI", size=8)
+        self.pdfs: list[Path] = []
+        self.photos: list[Path] = []
+        self.base_dir = PROJECT_ROOT / OUTPUT_SUBFOLDER_NAME
+        self.name_var = tk.StringVar()
+        self.name_touched = False
+        self.read_text = tk.BooleanVar(value=True)
+        self.keep_dxf = tk.BooleanVar(value=False)
+        self.show_fill = tk.BooleanVar(value=False)
+        self.rotation = tk.StringVar(value="Automático")
 
-        self.options = {
-            "photos": tk.BooleanVar(value=True),
-            "text": tk.BooleanVar(value=True),
-            "fill": tk.BooleanVar(value=False),
-            "dxf": tk.BooleanVar(value=False),
-        }
-        self.rotation = "auto"
-        self.photos_dir = PROJECT_ROOT / PHOTOS_SUBFOLDER_NAME
         self.events: "queue.Queue[tuple[str, object]]" = queue.Queue()
-        self.pending: list[Path] = []
         self.process: subprocess.Popen | None = None
         self.stop_requested = False
         self.busy = False
-        self.typing_widget: tk.Widget | None = None
-        self.typing_step = 0
-        self.last_output: Path | None = None
-        self._summary = ""
-        self.chips: dict[str, tk.Label] = {}
+        self.started_at = 0.0
+        self.jobs: list[Path] = []
+        self.outputs: list[Path] = []
+        self.summary = ""
+        self.out_dir: Path | None = None
 
         self._build_header()
-        self._build_chat()
-        self._build_footer()
-        self._refresh_chips()
+        self._build_bottom()
+        body = tk.Frame(self, bg=BG)
+        body.pack(fill="both", expand=True, padx=20, pady=(14, 8))
+        body.columnconfigure(0, weight=3, uniform="col")
+        body.columnconfigure(1, weight=2, uniform="col")
+        body.rowconfigure(0, weight=1)
+        self._build_left(body)
+        self._build_right(body)
 
+        self.name_var.trace_add("write", lambda *_: self._on_name_edit())
+        self._refresh_all()
         if HAS_DND:
             self.drop_target_register(DND_FILES)
             self.dnd_bind("<<Drop>>", self._on_drop)
+        self.after(150, self._poll)
+        self.after(1000, self._tick)
 
-        self.after(120, self._poll)
-        self.after(400, self._welcome)
+    # ---------- ventana ----------
 
-    # ---------- construcción de la ventana ----------
+    def _set_icon(self) -> None:
+        try:  # que la barra de tareas muestre el logo y no el de Python
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+        except Exception:
+            pass
+        try:
+            self.iconbitmap(default=str(ASSETS / "planos2dwg.ico"))
+        except Exception:
+            pass
 
     def _build_header(self) -> None:
-        bar = tk.Frame(self, bg=BLUE, height=58)
+        bar = tk.Frame(self, bg=NAVY)
         bar.pack(fill="x")
-        bar.pack_propagate(False)
-        avatar = tk.Canvas(bar, width=40, height=40, bg=BLUE, highlightthickness=0)
-        avatar.pack(side="left", padx=(14, 10), pady=9)
-        avatar.create_oval(2, 2, 38, 38, fill="white", outline="")
-        avatar.create_text(20, 20, text="P", font=("Segoe UI", 15, "bold"), fill=BLUE)
-        names = tk.Frame(bar, bg=BLUE)
-        names.pack(side="left", pady=8)
-        tk.Label(names, text="Planos a AutoCAD", bg=BLUE, fg="white", font=("Segoe UI", 12, "bold")).pack(anchor="w")
-        status = tk.Frame(names, bg=BLUE)
-        status.pack(anchor="w")
-        dot = tk.Canvas(status, width=10, height=10, bg=BLUE, highlightthickness=0)
-        dot.pack(side="left", pady=2)
-        dot.create_oval(1, 1, 9, 9, fill=GREEN, outline="")
-        self.status_label = tk.Label(status, text="en línea", bg=BLUE, fg="#dce8ff", font=self.font_small)
-        self.status_label.pack(side="left", padx=4)
+        try:
+            self.logo = tk.PhotoImage(file=str(ASSETS / "logo_44.png"))
+            tk.Label(bar, image=self.logo, bg=NAVY).pack(side="left", padx=(20, 12), pady=6)
+        except Exception:
+            self.logo = None
+        titles = tk.Frame(bar, bg=NAVY)
+        titles.pack(side="left", pady=6)
+        tk.Label(titles, text="Planos a AutoCAD", bg=NAVY, fg="white", font=("Segoe UI", 15, "bold")).pack(anchor="w")
+        tk.Label(
+            titles, text="Convierte un plano escaneado (PDF) en un archivo .dwg editable", bg=NAVY, fg="#b9cdf5", font=FONT_S
+        ).pack(anchor="w")
 
-    def _build_chat(self) -> None:
-        holder = tk.Frame(self, bg=BG)
-        holder.pack(fill="both", expand=True)
-        self.canvas = tk.Canvas(holder, bg=BG, highlightthickness=0)
-        scroll = ttk.Scrollbar(holder, orient="vertical", command=self.canvas.yview)
-        self.canvas.configure(yscrollcommand=scroll.set)
-        scroll.pack(side="right", fill="y")
-        self.canvas.pack(side="left", fill="both", expand=True)
-        self.inner = tk.Frame(self.canvas, bg=BG)
-        self.window_id = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
-        self.inner.bind("<Configure>", lambda _e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-        self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self.window_id, width=e.width))
-        self.bind_all("<MouseWheel>", lambda e: self.canvas.yview_scroll(int(-e.delta / 120), "units"))
+    def _card(self, parent: tk.Widget, number: str, title: str) -> tk.Frame:
+        frame = tk.Frame(parent, bg=CARD, highlightbackground=LINE, highlightthickness=1)
+        head = tk.Frame(frame, bg=CARD)
+        head.pack(fill="x", padx=14, pady=(8, 4))
+        badge = tk.Canvas(head, width=24, height=24, bg=CARD, highlightthickness=0)
+        badge.pack(side="left")
+        badge.create_oval(1, 1, 23, 23, fill=BLUE, outline="")
+        badge.create_text(12, 12, text=number, fill="white", font=("Segoe UI", 9, "bold"))
+        tk.Label(head, text=title, bg=CARD, fg=INK, font=("Segoe UI", 11, "bold")).pack(side="left", padx=8)
+        return frame
 
-    def _build_footer(self) -> None:
-        footer = tk.Frame(self, bg="#f7f9fc", highlightbackground="#d3dae3", highlightthickness=1)
-        footer.pack(fill="x", side="bottom")
+    def _build_left(self, body: tk.Frame) -> None:
+        left = tk.Frame(body, bg=BG)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        left.rowconfigure(0, weight=3)
+        left.rowconfigure(1, weight=2)
+        left.columnconfigure(0, weight=1)
 
-        self.chip_row = tk.Frame(footer, bg="#f7f9fc")
-        self.chip_row.pack(fill="x", padx=8, pady=(8, 2))
-        for column in range(3):
-            self.chip_row.columnconfigure(column, weight=1, uniform="chips")
-        for key, command in (
-            ("photos", lambda: self._toggle("photos")),
-            ("text", lambda: self._toggle("text")),
-            ("fill", lambda: self._toggle("fill")),
-            ("dxf", lambda: self._toggle("dxf")),
-            ("rotation", self._cycle_rotation),
+        # 1. el plano
+        card = self._card(left, "1", "Tu plano")
+        card.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
+        self.zone = tk.Canvas(card, bg=ZONE, highlightthickness=0, height=96, cursor="hand2")
+        self.zone.pack(fill="both", expand=True, padx=14, pady=(0, 6))
+        self.zone.bind("<Configure>", lambda _e: self._draw_zone())
+        self.zone.bind("<Button-1>", lambda _e: self._choose_pdfs())
+        self.zone.bind("<Enter>", lambda _e: self._draw_zone(hot=True))
+        self.zone.bind("<Leave>", lambda _e: self._draw_zone())
+        self.pdf_hint = tk.Label(card, text="", bg=CARD, fg=GRAY, font=FONT_S, anchor="w")
+        self.pdf_hint.pack(fill="x", padx=14, pady=(0, 6))
+
+        # 3. fotos
+        card = self._card(left, "3", "Fotos para más precisión (opcional)")
+        card.grid(row=1, column=0, sticky="nsew")
+        tk.Label(
+            card,
+            text="Fotos de partes del mismo plano: ayudan a leer mejor las cotas y los textos pequeños.",
+            bg=CARD, fg=GRAY, font=FONT_S, anchor="w", wraplength=430, justify="left",
+        ).pack(fill="x", padx=14)
+        row = tk.Frame(card, bg=CARD)
+        row.pack(fill="both", expand=True, padx=14, pady=(6, 10))
+        self.photo_list = tk.Listbox(
+            row, height=3, activestyle="none", font=FONT_S, bd=0, highlightbackground=LINE, highlightthickness=1,
+            selectbackground=ZONE_HOT, selectforeground=INK, selectmode="extended",
+        )
+        self.photo_list.pack(side="left", fill="both", expand=True)
+        buttons = tk.Frame(row, bg=CARD)
+        buttons.pack(side="left", padx=(10, 0), anchor="n")
+        self._button(buttons, "➕  Agregar fotos…", self._choose_photos, primary=False).pack(fill="x")
+        self._button(buttons, "Quitar", self._remove_photos, primary=False).pack(fill="x", pady=(6, 0))
+
+    def _build_right(self, body: tk.Frame) -> None:
+        right = tk.Frame(body, bg=BG)
+        right.grid(row=0, column=1, sticky="nsew")
+        right.columnconfigure(0, weight=1)
+
+        # 2. carpeta
+        card = self._card(right, "2", "Dónde guardarlo")
+        card.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        tk.Label(card, text="Nombre de la carpeta", bg=CARD, fg=INK, font=FONT_B, anchor="w").pack(fill="x", padx=14)
+        self.name_entry = tk.Entry(card, textvariable=self.name_var, font=FONT, bd=0, highlightbackground=LINE, highlightthickness=1, highlightcolor=BLUE)
+        self.name_entry.pack(fill="x", padx=14, pady=(4, 8), ipady=5)
+        tk.Label(card, text="Dentro de", bg=CARD, fg=INK, font=FONT_B, anchor="w").pack(fill="x", padx=14)
+        place = tk.Frame(card, bg=CARD)
+        place.pack(fill="x", padx=14, pady=(4, 4))
+        self.base_label = tk.Label(place, text="", bg="#f6f8fb", fg=INK, font=FONT_S, anchor="w", padx=8, pady=5, bd=0, highlightbackground=LINE, highlightthickness=1)
+        self.base_label.pack(side="left", fill="x", expand=True)
+        self._button(place, "Cambiar…", self._choose_base, primary=False).pack(side="left", padx=(6, 0))
+        self.create_label = tk.Label(card, text="", bg=CARD, fg=GREEN, font=FONT_S, anchor="w", wraplength=300, justify="left")
+        self.create_label.pack(fill="x", padx=14, pady=(2, 8))
+
+        # 4. opciones
+        card = self._card(right, "4", "Opciones")
+        card.grid(row=1, column=0, sticky="ew")
+        for text, var in (
+            ("Leer textos y cotas", self.read_text),
+            ("Guardar también un .dxf", self.keep_dxf),
+            ("Mostrar el escaneo gris de fondo", self.show_fill),
         ):
-            chip = tk.Label(self.chip_row, font=self.font_small, padx=9, pady=4, cursor="hand2", bd=1, relief="solid")
-            chip.grid(row=len(self.chips) // 3, column=len(self.chips) % 3, padx=3, pady=2, sticky="ew")
-            chip.bind("<Button-1>", lambda _e, c=command: c())
-            self.chips[key] = chip
-        folder = tk.Label(
-            self.chip_row, text="📂 Carpeta de fotos", font=self.font_small, padx=9, pady=4, cursor="hand2",
-            bd=1, relief="solid", bg=CHIP_OFF, fg=TEXT_DARK,
+            tk.Checkbutton(
+                card, text=text, variable=var, bg=CARD, activebackground=CARD, fg=INK, font=FONT, anchor="w",
+                selectcolor="white", bd=0, highlightthickness=0,
+            ).pack(fill="x", padx=14, pady=1)
+        turn = tk.Frame(card, bg=CARD)
+        turn.pack(fill="x", padx=14, pady=(4, 10))
+        tk.Label(turn, text="Giro del plano", bg=CARD, fg=INK, font=FONT).pack(side="left")
+        ttk.Combobox(turn, textvariable=self.rotation, values=list(ROTATIONS), state="readonly", width=14, font=FONT).pack(side="right")
+
+    def _build_bottom(self) -> None:
+        bottom = tk.Frame(self, bg=BG)
+        bottom.pack(fill="x", side="bottom", padx=20, pady=(0, 16))
+
+        self.go = self._button(bottom, "Convertir a AutoCAD", self._start, primary=True, big=True)
+        self.go.pack(fill="x")
+        style = ttk.Style(self)
+        style.theme_use("clam")
+        style.configure("Thin.Horizontal.TProgressbar", thickness=6, troughcolor=LINE, background=BLUE, bordercolor=BG, lightcolor=BLUE, darkcolor=BLUE)
+
+        self.progress = ttk.Progressbar(bottom, mode="indeterminate", style="Thin.Horizontal.TProgressbar")
+        self.status = tk.Label(bottom, text="", bg=BG, fg=GRAY, font=FONT_S, anchor="w")
+        self.status.pack(fill="x", pady=(4, 0))
+
+        self.log = tk.Text(
+            bottom, height=4, font=FONT_S, bd=0, bg=CARD, fg=INK, highlightbackground=LINE, highlightthickness=1,
+            wrap="word", state="disabled", padx=10, pady=6,
         )
-        folder.grid(row=1, column=2, padx=3, pady=2, sticky="ew")
-        folder.bind("<Button-1>", lambda _e: self._choose_photos_folder())
+        self.log.tag_configure("ok", foreground=GREEN)
+        self.log.tag_configure("warn", foreground="#b07a00")
+        self.log.tag_configure("err", foreground=RED)
+        self.log.tag_configure("big", font=FONT_B, foreground=INK)
 
-        composer = tk.Frame(footer, bg="#f7f9fc")
-        composer.pack(fill="x", padx=8, pady=(2, 10))
-        self.clip = tk.Button(
-            composer, text="📎", font=("Segoe UI", 14), bd=0, bg="#f7f9fc", activebackground="#e1e8f2",
-            cursor="hand2", command=self._choose_pdfs,
-        )
-        self.clip.pack(side="left", padx=(0, 6))
-        hint = "Arrastra tu plano PDF aquí o toca el clip" if HAS_DND else "Toca el clip para elegir tu plano PDF"
-        self.hint = tk.Label(
-            composer, text=hint, anchor="w", bg="white", fg=TEXT_GRAY, font=self.font, padx=12, pady=8,
-            bd=1, relief="solid", cursor="hand2",
-        )
-        self.hint.pack(side="left", fill="x", expand=True)
-        self.hint.bind("<Button-1>", lambda _e: self._choose_pdfs())
-        self.send = tk.Button(
-            composer, text="Elegir", font=self.font_bold, bd=0, bg=BLUE, fg="white", activebackground=BLUE_DARK,
-            activeforeground="white", padx=14, pady=6, cursor="hand2", command=self._choose_pdfs,
-        )
-        self.send.pack(side="left", padx=(6, 0))
+        self.result = tk.Frame(bottom, bg=BG)
+        self._button(self.result, "Abrir el plano", self._open_plan, primary=True).pack(side="left")
+        self._button(self.result, "Abrir la carpeta", self._open_folder, primary=False).pack(side="left", padx=8)
 
-        self.progress = ttk.Progressbar(footer, mode="indeterminate", length=WIDTH)
-
-    # ---------- fichas (opciones) ----------
-
-    def _chip_texts(self) -> dict[str, str]:
-        mark = lambda on: "✔" if on else "✖"  # noqa: E731
-        return {
-            "photos": f"{mark(self.options['photos'].get())} Usar fotos",
-            "text": f"{mark(self.options['text'].get())} Leer textos",
-            "fill": f"{mark(self.options['fill'].get())} Relleno gris",
-            "dxf": f"{mark(self.options['dxf'].get())} Guardar DXF",
-            "rotation": "↻ Giro: " + ("auto" if self.rotation == "auto" else f"{self.rotation}°"),
-        }
-
-    def _refresh_chips(self) -> None:
-        texts = self._chip_texts()
-        for key, chip in self.chips.items():
-            on = self.options[key].get() if key in self.options else self.rotation != "auto"
-            chip.configure(text=texts[key], bg=CHIP_ON if on else CHIP_OFF, fg=BLUE_DARK if on else TEXT_GRAY)
-
-    def _toggle(self, key: str) -> None:
-        self.options[key].set(not self.options[key].get())
-        self._refresh_chips()
-        explain = {
-            "photos": ("Voy a usar tus fotos del plano para leer mejor las cotas.", "No voy a usar las fotos."),
-            "text": ("Voy a leer los textos y las cotas.", "No voy a leer textos: queda más rápido, pero sin letras."),
-            "fill": ("Dejo el escaneo gris encendido para que compares.", "Dejo el escaneo gris apagado (solo líneas)."),
-            "dxf": ("Además del .dwg guardo un .dxf.", "Solo guardo el .dwg."),
-        }
-        on_text, off_text = explain[key]
-        self._say_bot(on_text if self.options[key].get() else off_text, small=True)
-
-    def _cycle_rotation(self) -> None:
-        self.rotation = ROTATIONS[(ROTATIONS.index(self.rotation) + 1) % len(ROTATIONS)]
-        self._refresh_chips()
-        self._say_bot(
-            "Detecto solo si el plano está de lado." if self.rotation == "auto"
-            else f"Giro el plano {self.rotation}° antes de convertirlo.",
-            small=True,
+    def _button(self, parent: tk.Widget, text: str, command, primary: bool, big: bool = False) -> tk.Button:
+        return tk.Button(
+            parent, text=text, command=command, font=("Segoe UI", 12 if big else 10, "bold" if primary else "normal"),
+            bd=0, relief="flat", cursor="hand2", padx=16 if primary else 10, pady=8 if big else 5,
+            bg=BLUE if primary else "#eef2f8", fg="white" if primary else INK,
+            activebackground=BLUE_DARK if primary else LINE, activeforeground="white" if primary else INK,
+            disabledforeground="#9fb0c8",
         )
 
-    def _choose_photos_folder(self) -> None:
-        folder = filedialog.askdirectory(title="Carpeta con fotos de partes del plano", initialdir=str(self.photos_dir))
-        if folder:
-            self.photos_dir = Path(folder)
-            self.options["photos"].set(True)
-            self._refresh_chips()
-            self._say_bot(f"Listo, buscaré fotos en: {self.photos_dir.name}", small=True)
+    # ---------- plano ----------
 
-    # ---------- burbujas ----------
-
-    def _rounded(self, canvas: tk.Canvas, x0: float, y0: float, x1: float, y1: float, r: float, **kw) -> None:
-        points = [
-            x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1,
-            x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0,
-        ]
-        canvas.create_polygon(points, smooth=True, **kw)
-
-    def _bubble(self, text: str, mine: bool, small: bool = False) -> tk.Frame:
-        font = self.font_small if small else self.font
-        pad_x, pad_y = 12, 8
-        # se mide con un Message oculto, que ajusta las líneas igual que el texto de la burbuja
-        meter = tk.Message(self, text=text, font=font, width=MAX_BUBBLE)
-        height = meter.winfo_reqheight()
-        width = min(max(meter.winfo_reqwidth(), 30), MAX_BUBBLE + 10)
-        meter.destroy()
-
-        row = tk.Frame(self.inner, bg=BG)
-        row.pack(fill="x", padx=12, pady=3)
-        cell = tk.Frame(row, bg=BG)
-        cell.pack(side="right" if mine else "left")
-        if not mine:
-            tk.Label(cell, text="Planos a AutoCAD", font=self.font_small, bg=BG, fg=TEXT_GRAY).pack(anchor="w", padx=6)
-        canvas = tk.Canvas(cell, width=width + 2 * pad_x, height=height + 2 * pad_y, bg=BG, highlightthickness=0)
-        canvas.pack(anchor="e" if mine else "w")
-        fill, line, ink = (BUBBLE_ME, BUBBLE_ME, "white") if mine else (BUBBLE_BOT, BUBBLE_BOT_LINE, TEXT_DARK)
-        self._rounded(canvas, 1, 1, width + 2 * pad_x - 1, height + 2 * pad_y - 1, 14, fill=fill, outline=line)
-        canvas.create_text(pad_x, pad_y, anchor="nw", text=text, font=font, fill=ink, width=MAX_BUBBLE)
-        stamp = tk.Label(cell, text=time.strftime("%H:%M"), font=self.font_small, bg=BG, fg=TEXT_GRAY)
-        stamp.pack(anchor="e" if mine else "w", padx=6)
-        self._scroll_down()
-        return cell
-
-    def _say_bot(self, text: str, small: bool = False) -> tk.Frame:
-        return self._bubble(text, mine=False, small=small)
-
-    def _say_me(self, text: str) -> tk.Frame:
-        return self._bubble(text, mine=True)
-
-    def _buttons(self, cell: tk.Frame, actions: list[tuple[str, object]]) -> None:
-        row = tk.Frame(cell, bg=BG)
-        row.pack(anchor="w", pady=(2, 0))
-        for label, command in actions:
-            tk.Button(
-                row, text=label, font=self.font_bold, bd=1, relief="solid", bg="white", fg=BLUE_DARK,
-                activebackground=CHIP_ON, padx=10, pady=4, cursor="hand2", command=command,
-            ).pack(side="left", padx=(0, 6))
-        self._scroll_down()
-
-    def _scroll_down(self) -> None:
-        self.update_idletasks()
-        self.canvas.yview_moveto(1.0)
-
-    def _welcome(self) -> None:
-        self._say_bot("¡Hola! 👋 Soy tu convertidor de planos.")
-        extra = "Arrastra un plano PDF a esta ventana" if HAS_DND else "Toca el clip 📎 de abajo"
-        self._say_bot(f"{extra} y te lo devuelvo como archivo de AutoCAD (.dwg), con muros, puertas, textos y cotas.")
-        self._say_bot("Abajo puedes encender o apagar opciones tocando las fichas. Si no sabes cuál, déjalas como están.", small=True)
-
-    # ---------- elegir y soltar archivos ----------
+    def _draw_zone(self, hot: bool = False) -> None:
+        zone = self.zone
+        zone.delete("all")
+        w, h = max(zone.winfo_width(), 200), max(zone.winfo_height(), 120)
+        zone.configure(bg=ZONE_HOT if hot and not self.busy else ZONE)
+        zone.create_rectangle(8, 8, w - 8, h - 8, outline=BLUE, dash=(7, 5), width=2)
+        if self.pdfs:
+            names = "\n".join(f"📄  {p.name}" for p in self.pdfs[:4]) + (f"\n… y {len(self.pdfs) - 4} más" if len(self.pdfs) > 4 else "")
+            zone.create_text(w / 2, h / 2 - 12, text=names, fill=INK, font=FONT_B, justify="center")
+            zone.create_text(w / 2, h - 26, text="Haz clic para cambiar el plano", fill=GRAY, font=FONT_S)
+        else:
+            zone.create_text(w / 2, h / 2 - 22, text="📄", font=("Segoe UI Emoji", 28), fill=BLUE)
+            zone.create_text(
+                w / 2, h / 2 + 18, fill=INK, font=("Segoe UI", 12, "bold"),
+                text="Arrastra aquí tu plano en PDF" if HAS_DND else "Haz clic para elegir tu plano en PDF",
+            )
+            if HAS_DND:
+                zone.create_text(w / 2, h / 2 + 42, text="o haz clic para buscarlo", fill=GRAY, font=FONT_S)
 
     def _choose_pdfs(self) -> None:
         if self.busy:
             return
         files = filedialog.askopenfilenames(title="Elige tu plano en PDF", filetypes=[("Planos en PDF", "*.pdf")])
         if files:
-            self._queue_files(list(files))
+            self._set_pdfs(list(files))
+
+    def _set_pdfs(self, paths: list[str]) -> None:
+        pdfs, ignored = collect_pdfs(paths)
+        if not pdfs:
+            messagebox.showinfo("Planos a AutoCAD", "Eso no es un PDF. Arrastra tu plano escaneado en formato PDF.")
+            return
+        self.pdfs = pdfs
+        if not self.name_touched:
+            self.name_var.set(pdfs[0].stem)
+        self._hide_result()
+        self._refresh_all()
+
+    # ---------- fotos ----------
+
+    def _choose_photos(self) -> None:
+        if self.busy:
+            return
+        patterns = " ".join(f"*{ext}" for ext in sorted(PHOTO_EXTENSIONS))
+        files = filedialog.askopenfilenames(title="Elige fotos de partes del plano", filetypes=[("Fotos", patterns)])
+        if files:
+            self._add_photos([Path(f) for f in files])
+
+    def _add_photos(self, paths: list[Path]) -> None:
+        merged = unique_photos(self.photos + paths)
+        self.photos = merged
+        self._refresh_photos()
+
+    def _remove_photos(self) -> None:
+        if self.busy:
+            return
+        selected = set(self.photo_list.curselection())
+        self.photos = [p for i, p in enumerate(self.photos) if selected and i not in selected] if selected else []
+        self._refresh_photos()
+
+    def _refresh_photos(self) -> None:
+        self.photo_list.delete(0, "end")
+        for photo in self.photos:
+            self.photo_list.insert("end", "📷  " + photo.name)
+        if not self.photos:
+            self.photo_list.insert("end", "Aún no hay fotos. Es opcional.")
+            self.photo_list.itemconfigure(0, foreground=GRAY)
+
+    # ---------- carpeta ----------
+
+    def _choose_base(self) -> None:
+        if self.busy:
+            return
+        folder = filedialog.askdirectory(title="¿Dentro de qué carpeta lo guardo?", initialdir=str(self.base_dir if self.base_dir.exists() else PROJECT_ROOT))
+        if folder:
+            self.base_dir = Path(folder)
+            self._refresh_all()
+
+    def _on_name_edit(self) -> None:
+        if self.focus_get() is self.name_entry:
+            self.name_touched = True
+        self._refresh_folder_label()
+
+    def _folder_name(self) -> str:
+        fallback = self.pdfs[0].stem if self.pdfs else "Plano"
+        return clean_folder_name(self.name_var.get(), fallback)
+
+    def _target_dir(self) -> Path:
+        return self.base_dir / self._folder_name()
+
+    def _refresh_folder_label(self) -> None:
+        target = self._target_dir()
+        verb = "Se usará la carpeta existente" if target.exists() else "Se creará la carpeta"
+        self.create_label.configure(text=f"{verb}:\n{target}")
+
+    def _refresh_all(self) -> None:
+        self._draw_zone()
+        self.base_label.configure(text=self._shorten(str(self.base_dir), 30))
+        self._refresh_folder_label()
+        self._refresh_photos()
+        self.pdf_hint.configure(
+            text=f"{len(self.pdfs)} plano(s) listo(s) para convertir." if self.pdfs
+            else "Solo PDF escaneados. También puedes soltar varias fotos aquí para agregarlas."
+        )
+        self.go.configure(state="normal" if self.pdfs or not self.busy else "disabled")
+
+    @staticmethod
+    def _shorten(text: str, limit: int) -> str:
+        return text if len(text) <= limit else "…" + text[-(limit - 1):]
 
     def _on_drop(self, event) -> None:
-        self._queue_files(list(self.tk.splitlist(event.data)))
-
-    def _queue_files(self, paths: list[str]) -> None:
-        pdfs, ignored = collect_pdfs(paths)
-        if ignored and not pdfs:
-            self._say_bot("Eso no lo puedo convertir 🤔 Solo entiendo planos en PDF.")
+        if self.busy:
             return
-        if ignored:
-            self._say_bot(f"Dejé por fuera {len(ignored)} archivo(s) que no son PDF.", small=True)
-        for pdf in pdfs:
-            self._say_me(f"📄 {pdf.name}")
-        self.pending.extend(pdfs)
-        if not self.busy:
-            self._next_job()
-        elif pdfs:
-            self._say_bot(f"Los dejo en fila ({len(self.pending)} esperando).", small=True)
+        dropped = list(self.tk.splitlist(event.data))
+        images = [Path(p) for p in dropped if Path(p).suffix.lower() in PHOTO_EXTENSIONS]
+        others = [p for p in dropped if Path(p).suffix.lower() not in PHOTO_EXTENSIONS]
+        if images:
+            self._add_photos(images)
+        if others:
+            self._set_pdfs(others)
 
-    # ---------- ejecución ----------
+    # ---------- conversión ----------
 
-    def _current_options(self) -> Options:
+    def _conversion_options(self, out_dir: Path) -> Options:
         return Options(
-            use_photos=self.options["photos"].get(),
-            photos_dir=self.photos_dir,
-            read_text=self.options["text"].get(),
-            show_scan_fill=self.options["fill"].get(),
-            keep_dxf=self.options["dxf"].get(),
-            rotation=self.rotation,
+            photos=tuple(self.photos),
+            output_dir=out_dir,
+            read_text=self.read_text.get(),
+            show_scan_fill=self.show_fill.get(),
+            keep_dxf=self.keep_dxf.get(),
+            rotation=ROTATIONS[self.rotation.get()],
         )
 
-    def _next_job(self) -> None:
-        if not self.pending:
-            self._set_busy(False)
+    def _start(self) -> None:
+        if self.busy:
+            self._stop()
             return
-        pdf = self.pending.pop(0)
+        if not self.pdfs:
+            messagebox.showinfo("Planos a AutoCAD", "Primero arrastra tu plano en PDF a la zona azul.")
+            return
+        out_dir = self._target_dir()
+        existed = out_dir.exists()
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            messagebox.showerror("Planos a AutoCAD", f"No pude crear la carpeta:\n{out_dir}\n\n{exc}")
+            return
+        self.out_dir = out_dir
+        self.outputs = []
+        self.summary = ""
+        self._hide_result()
+        self._clear_log()
+        self._log(("Se usará la carpeta existente: " if existed else "Carpeta creada: ") + str(out_dir), "ok")
+        if self.photos and not self.read_text.get():
+            self._log("Ojo: las fotos solo se usan si 'Leer textos y cotas' está activado.", "warn")
+        self.jobs = list(self.pdfs)
         self._set_busy(True)
-        self._say_bot(f"Recibido: {pdf.name}. Empiezo ahora; puede tardar unos minutos ⏳")
-        self.show_typing()
-        command = build_command(sys.executable, PROJECT_ROOT / "main.py", pdf, self._current_options())
+        self._next_job()
+
+    def _next_job(self) -> None:
+        if not self.jobs:
+            self._finish()
+            return
+        pdf = self.jobs.pop(0)
+        assert self.out_dir is not None
+        self.status.configure(text=f"Convirtiendo {pdf.name}… (puede tardar unos minutos)")
+        self._log(f"Convirtiendo {pdf.name}", "big")
+        command = build_command(sys.executable, PROJECT_ROOT / "main.py", pdf, self._conversion_options(self.out_dir))
         threading.Thread(target=self._run, args=(command, pdf), daemon=True).start()
 
     def _run(self, command: list[str], pdf: Path) -> None:
         env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
         seen: set[str] = set()
-        got_done = False
+        ok = False
         errors: list[str] = []
         try:
             self.process = subprocess.Popen(
@@ -348,7 +439,7 @@ class ChatApp(_BaseWindow):
                 if event is None:
                     continue
                 if event.kind == "done":
-                    got_done = True
+                    ok = True
                 if event.kind == "error":
                     errors.append(event.text)
                     continue
@@ -357,43 +448,14 @@ class ChatApp(_BaseWindow):
         except Exception as exc:  # no tumbar la ventana por un fallo al lanzar
             errors.append(str(exc))
         finally:
-            self.events.put(("end", (pdf, got_done, errors, self.stop_requested)))
+            self.events.put(("end", (pdf, ok, errors, self.stop_requested)))
 
-    def stop(self) -> None:
+    def _stop(self) -> None:
         if self.process and self.process.poll() is None:
             self.stop_requested = True
+            self.jobs.clear()
             self.process.terminate()
-            self._say_bot("Detenido ✋", small=True)
-
-    def _set_busy(self, busy: bool) -> None:
-        self.busy = busy
-        if busy:
-            self.stop_requested = False
-            self.status_label.configure(text="trabajando…")
-            self.progress.pack(fill="x")
-            self.progress.start(14)
-            self.hint.configure(text="Convirtiendo… toca Detener si te equivocaste")
-            self.send.configure(text="Detener", command=self.stop, bg="#d9534f", activebackground="#b9403d")
-            self.clip.configure(state="disabled")
-        else:
-            self.status_label.configure(text="en línea")
-            self.progress.stop()
-            self.progress.pack_forget()
-            self.hint.configure(text="Arrastra tu plano PDF aquí o toca el clip" if HAS_DND else "Toca el clip para elegir tu plano PDF")
-            self.send.configure(text="Elegir", command=self._choose_pdfs, bg=BLUE, activebackground=BLUE_DARK)
-            self.clip.configure(state="normal")
-
-    # ---------- indicador "escribiendo…" ----------
-
-    def show_typing(self) -> None:
-        self.hide_typing()
-        self.typing_widget = self._say_bot("•  •  •")
-        self.typing_step = 0
-
-    def hide_typing(self) -> None:
-        if self.typing_widget is not None:
-            self.typing_widget.master.destroy()
-            self.typing_widget = None
+            self._log("Detenido.", "warn")
 
     def _poll(self) -> None:
         try:
@@ -408,41 +470,89 @@ class ChatApp(_BaseWindow):
         self.after(150, self._poll)
 
     def _on_event(self, event: Event) -> None:
-        self.hide_typing()
         if event.kind == "done":
-            self.last_output = Path(event.text)
-            return  # el mensaje final se arma al terminar, junto con el resumen
-        if event.kind == "summary":
-            self._summary = event.text
-            return
-        self._say_bot(event.text, small=event.kind == "info")
-        self.show_typing()
+            self.outputs.append(Path(event.text))
+        elif event.kind == "summary":
+            self.summary = event.text
+            self._log("Contiene: " + event.text + ".")
+        else:
+            self._log(event.text, "warn" if event.kind == "warn" else None)
 
     def _on_end(self, pdf: Path, ok: bool, errors: list[str], stopped: bool) -> None:
-        self.hide_typing()
-        if ok and self.last_output:
-            output = self.last_output
-            cell = self._say_bot(f"¡Listo! 🎉 Tu plano quedó en AutoCAD:\n{output.name}")
-            if self._summary:
-                self._say_bot("Contiene: " + self._summary + ".", small=True)
-            self._buttons(cell, [
-                ("Abrir plano", lambda p=output: os.startfile(p)),  # type: ignore[attr-defined]
-                ("Abrir carpeta", lambda p=output: os.startfile(p.parent)),  # type: ignore[attr-defined]
-            ])
+        if ok:
+            self._log(f"✔ Listo: {self.outputs[-1].name}", "ok")
         elif not stopped:
-            detail = errors[-1] if errors else "no se generó ningún archivo"
-            self._say_bot(f"Uy, no pude con ese plano 😕\n{detail}")
-            self._say_bot("Prueba con otro PDF, o revisa que sea un escaneo legible.", small=True)
-        self._summary = ""
-        self.last_output = None
-        if stopped:
-            self.pending.clear()
+            self._log(f"✖ No pude convertir {pdf.name}: " + (errors[-1] if errors else "no se generó ningún archivo"), "err")
         self._next_job()
+
+    def _finish(self) -> None:
+        self._set_busy(False)
+        if self.outputs:
+            self.status.configure(text="¡Listo! Tu plano está en AutoCAD.", fg=GREEN)
+            self.result.pack(anchor="w", pady=(8, 0))
+        else:
+            self.status.configure(text="No se generó ningún plano.", fg=RED)
+
+    def _set_busy(self, busy: bool) -> None:
+        self.busy = busy
+        if busy:
+            self.stop_requested = False
+            self.started_at = time.time()
+            self.status.configure(fg=GRAY)
+            self.progress.pack(fill="x", pady=(8, 0), before=self.status)
+            self.progress.start(12)
+            self.go.configure(text="Detener", bg=RED, activebackground="#b13333")
+            self.log.pack(fill="x", pady=(4, 0))
+            self.after(50, self._grow_to_fit)
+        else:
+            self.progress.stop()
+            self.progress.pack_forget()
+            self.go.configure(text="Convertir a AutoCAD", bg=BLUE, activebackground=BLUE_DARK)
+        self._draw_zone()
+
+    def _grow_to_fit(self) -> None:
+        """Al empezar a convertir aparece el registro: se agranda la ventana para que quepa."""
+        self.update_idletasks()
+        needed = self.winfo_reqheight() + 10
+        limit = self.winfo_screenheight() - 70
+        if needed > self.winfo_height():
+            self.geometry(f"{self.winfo_width()}x{min(needed, limit)}+{self.winfo_x()}+10")
+
+    def _tick(self) -> None:
+        if self.busy:
+            seconds = int(time.time() - self.started_at)
+            base = self.status.cget("text").split("  ·  ")[0]
+            self.status.configure(text=f"{base}  ·  {seconds // 60}:{seconds % 60:02d}")
+        self.after(1000, self._tick)
+
+    # ---------- registro y resultado ----------
+
+    def _log(self, text: str, tag: str | None = None) -> None:
+        self.log.configure(state="normal")
+        self.log.insert("end", text + "\n", tag or ())
+        self.log.configure(state="disabled")
+        self.log.see("end")
+
+    def _clear_log(self) -> None:
+        self.log.configure(state="normal")
+        self.log.delete("1.0", "end")
+        self.log.configure(state="disabled")
+
+    def _hide_result(self) -> None:
+        self.result.pack_forget()
+        self.status.configure(text="", fg=GRAY)
+
+    def _open_plan(self) -> None:
+        if self.outputs:
+            os.startfile(self.outputs[-1])  # type: ignore[attr-defined]
+
+    def _open_folder(self) -> None:
+        if self.out_dir:
+            os.startfile(self.out_dir)  # type: ignore[attr-defined]
 
 
 def main() -> None:
-    app = ChatApp()
-    app.mainloop()
+    App().mainloop()
 
 
 if __name__ == "__main__":

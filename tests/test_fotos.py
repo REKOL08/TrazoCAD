@@ -3,7 +3,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from src.fotos import find_photos, merge_texts, register_photos
+from src.fotos import find_photos, merge_texts, register_photos, unique_photos
 from src.texto import TextItem, correct_spanish
 
 
@@ -31,6 +31,17 @@ def test_fotos_identicas_se_cuentan_una_sola_vez(tmp_path: Path) -> None:
     (tmp_path / "LEEME.txt").write_text("no es una imagen")
 
     assert len(find_photos(tmp_path)) == 1
+
+
+def test_unique_photos_ignora_repetidas_y_lo_que_no_es_imagen(tmp_path: Path) -> None:
+    foto = np.full((40, 40, 3), 90, np.uint8)
+    cv2.imwrite(str(tmp_path / "a.png"), foto)
+    cv2.imwrite(str(tmp_path / "copia.png"), foto)
+    (tmp_path / "notas.txt").write_text("hola")
+
+    resultado = unique_photos([tmp_path / "a.png", tmp_path / "copia.png", tmp_path / "notas.txt", tmp_path / "no_existe.jpg"])
+
+    assert [p.name for p in resultado] == ["a.png"]
 
 
 def test_carpeta_inexistente_no_da_fotos(tmp_path: Path) -> None:

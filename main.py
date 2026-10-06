@@ -37,6 +37,7 @@ from src.converter import (  # noqa: E402
     VALID_ROTATIONS,
     convert_pdf,
 )
+from src.fotos import find_photos, unique_photos  # noqa: E402
 from src.utils import (  # noqa: E402
     DEFAULT_DPI,
     MAX_DPI,
@@ -139,6 +140,21 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--foto",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="ARCHIVO",
+        help="Una foto de una parte del plano (se puede repetir). Si se usa, solo se toman estas fotos.",
+    )
+    parser.add_argument(
+        "--salida",
+        type=Path,
+        default=None,
+        metavar="CARPETA",
+        help=f"Carpeta donde guardar los planos; se crea si no existe (por defecto '{OUTPUT_SUBFOLDER_NAME}').",
+    )
+    parser.add_argument(
         "--sin-fotos",
         action="store_true",
         help="No usar fotos de partes del plano, aunque haya en la carpeta.",
@@ -203,12 +219,18 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("No se encontró ningún archivo .pdf en lo indicado: %s", raw_inputs)
         return 1
 
-    output_dir = PROJECT_ROOT / OUTPUT_SUBFOLDER_NAME
+    output_dir = args.salida or PROJECT_ROOT / OUTPUT_SUBFOLDER_NAME
+    output_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Se van a procesar %d archivo(s) PDF a %d DPI.", len(pdfs), args.dpi)
     logger.info("Los resultados se guardarán en: %s", output_dir)
 
     successes = 0
-    photos_dir = None if args.sin_fotos else (args.fotos or PROJECT_ROOT / PHOTOS_SUBFOLDER_NAME)
+    if args.sin_fotos:
+        photos: list[Path] = []
+    elif args.foto:
+        photos = unique_photos(args.foto)
+    else:
+        photos = find_photos(args.fotos or PROJECT_ROOT / PHOTOS_SUBFOLDER_NAME)
     failures = 0
     for pdf_path in pdfs:
         logger.info("Procesando: %s", pdf_path)
@@ -226,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
             read_text=not args.sin_texto,
             keep_dxf=args.conservar_dxf,
             trace_visible=args.calco_visible,
-            photos_dir=photos_dir,
+            photos=photos,
         )
         if result.success:
             successes += 1

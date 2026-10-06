@@ -52,13 +52,12 @@ def _flatten(gray: np.ndarray) -> np.ndarray:
     return cv2.divide(gray, cv2.medianBlur(gray, _BACKGROUND_KERNEL), scale=255)
 
 
-def find_photos(folder: Path) -> list[Path]:
-    """Las imágenes de la carpeta, sin repetir las que son idénticas byte a byte."""
-    if not folder.is_dir():
-        return []
+def unique_photos(paths: list[Path]) -> list[Path]:
+    """Las imágenes de la lista que se pueden usar, sin repetir las idénticas byte a byte."""
     seen: set[str] = set()
     photos: list[Path] = []
-    for path in sorted(folder.iterdir()):
+    for path in paths:
+        path = Path(path)
         if path.suffix.lower() not in PHOTO_EXTENSIONS or not path.is_file():
             continue
         digest = hashlib.md5(path.read_bytes()).hexdigest()
@@ -67,6 +66,13 @@ def find_photos(folder: Path) -> list[Path]:
         seen.add(digest)
         photos.append(path)
     return photos
+
+
+def find_photos(folder: Path) -> list[Path]:
+    """Las imágenes de la carpeta, sin repetir las que son idénticas byte a byte."""
+    if not folder.is_dir():
+        return []
+    return unique_photos(sorted(folder.iterdir()))
 
 
 def register_photos(reference: np.ndarray, photos: list[Path]) -> list[RegisteredPhoto]:

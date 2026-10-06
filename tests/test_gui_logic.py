@@ -1,20 +1,20 @@
 from pathlib import Path
 
-from src.gui_logic import Options, build_command, collect_pdfs, friendly_event
+from src.gui_logic import Options, build_command, clean_folder_name, collect_pdfs, friendly_event
 
 
 def _linea(nivel: str, mensaje: str) -> str:
     return f"2026-10-05 17:42:47 [{nivel}] {mensaje}"
 
 
-def test_comando_por_defecto_solo_lleva_el_pdf() -> None:
+def test_sin_fotos_ni_carpeta_el_comando_apaga_las_fotos() -> None:
     comando = build_command("py", Path("main.py"), Path("a.pdf"), Options())
 
-    assert comando == ["py", "main.py", "a.pdf"]
+    assert comando == ["py", "main.py", "a.pdf", "--sin-fotos"]
 
 
-def test_las_fichas_apagadas_o_encendidas_se_traducen_a_banderas() -> None:
-    opciones = Options(use_photos=False, read_text=False, show_scan_fill=True, keep_dxf=True, rotation="90")
+def test_las_opciones_se_traducen_a_banderas() -> None:
+    opciones = Options(read_text=False, show_scan_fill=True, keep_dxf=True, rotation="90")
 
     comando = build_command("py", Path("main.py"), Path("a.pdf"), opciones)
 
@@ -22,11 +22,23 @@ def test_las_fichas_apagadas_o_encendidas_se_traducen_a_banderas() -> None:
     assert comando[comando.index("--rotar") + 1] == "90"
 
 
-def test_la_carpeta_de_fotos_elegida_se_pasa_al_convertidor() -> None:
-    comando = build_command("py", Path("main.py"), Path("a.pdf"), Options(photos_dir=Path("mis_fotos")))
+def test_las_fotos_y_la_carpeta_de_salida_se_pasan_al_convertidor() -> None:
+    opciones = Options(photos=(Path("f1.jpg"), Path("f2.jpg")), output_dir=Path("Casa 1"))
 
-    assert comando[comando.index("--fotos") + 1] == "mis_fotos"
+    comando = build_command("py", Path("main.py"), Path("a.pdf"), opciones)
+
+    fotos = [comando[i + 1] for i, c in enumerate(comando) if c == "--foto"]
+    assert fotos == ["f1.jpg", "f2.jpg"]
     assert "--sin-fotos" not in comando
+    assert comando[comando.index("--salida") + 1] == "Casa 1"
+
+
+def test_el_nombre_de_carpeta_se_limpia_para_windows() -> None:
+    assert clean_folder_name('Casa: "Lote 3"/Norte?', "x") == "Casa Lote 3Norte"
+    assert clean_folder_name("  Plano 1. ", "x") == "Plano 1"
+    assert clean_folder_name("   ", "respaldo") == "respaldo"
+    assert clean_folder_name("CON", "respaldo") == "respaldo"
+    assert clean_folder_name("...", "respaldo") == "respaldo"
 
 
 def test_collect_pdfs_separa_pdf_carpetas_y_otros(tmp_path: Path) -> None:

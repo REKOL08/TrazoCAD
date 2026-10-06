@@ -6,69 +6,32 @@ textos editables y un calco de referencia del escaneo. Pensada para que un
 arquitecto o ingeniero sin experiencia en programación la instale en pocos
 minutos y la use así:
 
-> **Doble clic en `abrir_app.bat`, arrastra el PDF a la ventana de chat y toca
-> «Abrir plano».** O, sin ventana: arrastra el PDF sobre `convertir.bat` y recoge el
-> `.dwg` en la carpeta `Convertidos_DWG`. Sin elegir nada: el programa detecta solo
-> si el plano está de lado y dónde está el cajetín.
+> **Abre el programa «Planos a AutoCAD» (acceso directo del escritorio), arrastra el
+> PDF a la zona azul, ponle nombre a la carpeta y toca «Convertir a AutoCAD».** O, sin
+> ventana: arrastra el PDF sobre `convertir.bat`. El programa detecta solo si el plano
+> está de lado y dónde está el cajetín.
 
-## La ventana de chat (`abrir_app.bat`)
+## El programa de escritorio («Planos a AutoCAD»)
 
-Una ventana sencilla, tipo chat de los primeros mensajeros: el programa te saluda, tú le pasas el
-plano y te va contando lo que hace.
+Una ventana normal de programa, con su logo, en cuatro pasos:
 
-1. Doble clic en **`abrir_app.bat`**.
-2. **Arrastra el PDF** a la ventana (o toca el clip 📎). Puedes soltar varios o una carpeta: se
-   convierten uno tras otro.
-3. Verás mensajes cortos («✔ Muros y ejes dibujados», «📷 Usé tus fotos...») y al final los botones
-   **Abrir plano** y **Abrir carpeta**. Puedes tocar **Detener** mientras convierte.
+1. **Tu plano:** arrastra el PDF a la zona azul (o haz clic para buscarlo). Puedes soltar varios.
+2. **Dónde guardarlo:** escribe el **nombre de la carpeta**; se **crea al tocar Convertir**, antes de
+   generar nada, dentro de `Convertidos_DWG` (o la carpeta que elijas con «Cambiar…»). Por defecto
+   lleva el nombre del PDF. Debajo ves la ruta exacta que se va a crear.
+3. **Fotos para más precisión (opcional):** «Agregar fotos…» (o suéltalas en la ventana) con fotos de
+   partes del mismo plano; ayudan a leer mejor las cotas y los textos pequeños. Las fotos de otro plano
+   se ignoran solas.
+4. **Opciones:** leer textos y cotas, guardar también un `.dxf`, mostrar el escaneo gris de fondo y giro
+   del plano (automático, 90°, 180°, 270°).
 
-Las opciones son **fichas** sobre la barra de abajo; toca para encender o apagar (el chat te
-explica qué cambió): *Usar fotos*, *Leer textos* (apagado = más rápido, sin letras), *Relleno gris*,
-*Guardar DXF*, *Giro* (auto / 90 / 180 / 270) y *Carpeta de fotos*. Por dentro la ventana ejecuta el
-mismo `main.py` en un proceso aparte, así que el resultado es idéntico al de la línea de comandos.
+Después **Convertir a AutoCAD**: aparece el avance paso a paso (con **Detener** si te equivocaste) y
+al final **Abrir el plano** y **Abrir la carpeta**. Por dentro ejecuta el mismo `main.py` en un proceso
+aparte, así que el resultado es idéntico al de la línea de comandos.
 
-## ⚠️ Qué hace y qué NO hace esta herramienta (leer antes de usar)
-
-Cada plano se entrega como **un solo archivo** (`nombre-del-pdf.dwg`) con estas **capas**. Lo reconstruido va en capas propias, con líneas rectas y de un solo trazo (sin el temblor del escaneo) y una jerarquía de grosores de línea (muros 0,35 mm, detalle 0,09 mm...). **Todo el plano se dibuja como líneas**, no como manchas: lo que se reconoce (muros, ejes, arcos, puertas, ventanas, sanitarios, textos) va en capas propias y de colores, y el resto del dibujo (escaleras, mobiliario, cotas, curvas, rayados) se rehace como líneas finas de un solo trazo en la capa `DETALLE`. El escaneo va además dentro del archivo, **apagado**, como relleno gris de comparación. El archivo se abre ya centrado en el dibujo:
-
-| Capa | Qué contiene | Calidad |
-|---|---|---|
-| `MUROS` | Caras de muros como líneas **rectas, paralelas y enderezadas** (horizontal/vertical exactas), con esquinas prolongadas hasta cruzarse y los extremos libres cerrados con un remate | Limpia, pero **parcial**: faltan tramos. Se descartan las filas de cotas (otra separación entre líneas) y los contornos cortos aislados como muebles |
-| `PUERTAS` | El arco de giro de cada puerta y su hoja (si está dibujada), en amarillo | Detecta las puertas de arco fino con bisagra sobre un muro; en un plano real encontró 4 de ~10, así que **faltan puertas**. La hoja solo aparece si se ve en el escaneo |
-| `SANITARIOS` | Inodoros y lavamanos como **elipses limpias** de CAD (magenta), buscadas solo dentro de los baños | Aproximada: solo en cuartos etiquetados BAÑO, elipses con tamaño razonable respecto al muro; sin catálogo de bloques ni forma real de la taza, y no reconoce camas, sofás ni cocinas |
-| `VENTANAS` | Huecos en un muro con líneas finas dentro: las tres líneas (cara, centro, cara) y sus jambas, en celeste | **Muy incompleta**: si el plano dibuja la ventana sobre las líneas de las caras del muro, en el escaneo el muro parece continuo y no se ve el hueco; en el plano de prueba solo se encontró 1 |
-| `ARCOS` | Arcos y círculos reales (`ARC`/`CIRCLE`): muros curvos, puertas batientes, escaleras circulares | Buena en curvas grandes; puede haber algún arco falso o faltar uno |
-| `EJES` | Ejes de trazo y punto (tipo de línea `CENTER`): la cuadrícula de letras y números y algunos radiales | Buena en la cuadrícula; puede faltar algún eje radial y no toma como eje las líneas de corte continuas |
-| `TEXTOS` | Los nombres de espacios y las cifras leídos con OCR, como **texto de AutoCAD editable** (se pueden corregir con doble clic), en azul | Buena en nombres (SALON SOCIAL, COCINA, ACCESO...); se corrigen confusiones típicas con un vocabulario de planos (BARO -> BAÑO) |
-| `COTAS` | Solo las **cifras** de las cotas (2.05, 0.90...) que el OCR leyó con seguridad, en verde, separadas de los nombres de los espacios | **Incompleta**: con un escaneo de 150 dpi se leen pocas cifras. No se generan cotas de AutoCAD (`DIMENSION`), solo el texto |
-| `TEXTOS_REVISAR` | Lecturas dudosas (poca confianza, no reconocidas en el vocabulario) en naranja | Hay que revisarlas a mano; su dibujo original sigue en `CALCADO_REFERENCIA` para comparar |
-| `DETALLE` | Todo lo que no es muro, eje, arco, puerta, ventana, sanitario ni texto leído (escaleras, contornos de mobiliario, cotas, curvas, rayados): se borra de la tinta lo ya reconstruido, lo que queda se **adelgaza a su línea central**, se recorre como grafo, se simplifica (0,14 mm), se endereza a horizontal/vertical y se unen los tramos continuos. Las **rayas cortas de las líneas discontinuas** (trazos, trazo y punto) se conservan como rayas sueltas. Rectas como `LINE`, curvas como polilíneas. En blanco y con grosor fino (0,13 mm) | Recoge casi todo el detalle como **líneas finas de un solo trazo**, pero con la resolución de un escaneo de 150 dpi algunas líneas salen con pequeños quiebres, las curvas son polilíneas (no arcos exactos) y las letras que el OCR no leyó pueden aparecer como trazos sueltos |
-| `CALCADO_REFERENCIA` | La tinta del escaneo como **relleno sólido gris** (una mancha por trazo, con sus agujeros). Va **apagada** | Solo para comparar con el escaneo original; hereda los bordes irregulares del JPEG. Se enciende desde el administrador de capas o con `--calco-visible` al convertir |
-
-- **No son objetos CAD "inteligentes"**: no hay cotas (`DIMENSION`) ni muebles como bloques (solo sanitarios como elipses),
-  y las puertas y ventanas son solo geometría (no bloques con sus atributos), y los muros no tienen relleno ni espesor como objeto.
-  Los textos sí son `TEXT` editable si instalaste el OCR (ver abajo); sin él
-  quedan solo como calco.
-  La salida es una **base para que un dibujante redibuje**, no un plano
-  terminado.
-- Modo `lineas` (`--modo lineas`): solo líneas rectas sueltas, sin muros ni
-  textos. Más limpio pero muy incompleto; no se recomienda.
-- **El giro y el cajetín se detectan solos.** Si el escaneo viene de lado (como el
-  del plano de prueba), se lee el texto en las cuatro orientaciones y se elige la
-  que reconoce más palabras de plano (necesita el OCR; sin él no se gira). El
-  recuadro de datos del plano (cajetín) se localiza como una pila de líneas largas
-  en la parte baja y se ignora al buscar muros. Si se equivoca, puedes forzarlo con
-  `--rotar 0|90|180|270` y `--ignorar-inferior 0.17`. Un escaneo ligeramente
-  inclinado también se **endereza** solo.
-- La fidelidad depende de la calidad del escaneo. Escanea a 300-400 DPI en
-  blanco y negro o gris.
-- **El `.dwg` lo escribe ODA File Converter.** Ninguna librería libre de Python
-  escribe `.dwg` (es un formato propietario de Autodesk): el programa construye un
-  DXF y lo convierte con ODA File Converter (ver
-  [instalación](#convertir-a-dwg-real)). **Sin ODA instalado se entrega el mismo
-  plano como `.dxf`**, que AutoCAD abre igual. En ambos casos el archivo es único.
-- Si ya tienes el **DWG original** del plano, eso siempre dará mejor
-  resultado que cualquier conversión desde un escaneo.
+**Acceso directo con logo:** `crear_acceso_directo.bat` lo crea en tu escritorio («Planos a AutoCAD»).
+También puedes abrir el programa con `abrir_app.bat`. El logo se regenera con `assets/hacer_logo.py`
+(necesita Pillow, solo para eso).
 
 ## Requisitos del sistema
 
@@ -159,6 +122,8 @@ python main.py planta1.pdf --sin-texto          # no leer textos (más rápido, 
 python main.py planta1.pdf --calco-visible      # encender el relleno gris del escaneo (por defecto va apagado)
 python main.py planta1.pdf --fotos MIS_FOTOS    # carpeta con fotos de partes del plano (por defecto: planos_de_prueba)
 python main.py planta1.pdf --sin-fotos          # ignorar las fotos aunque haya en la carpeta
+python main.py planta1.pdf --foto a.jpg --foto b.jpg   # usar solo estas fotos
+python main.py planta1.pdf --salida "C:\Planos\Casa 1"  # carpeta de resultados (se crea)
 python main.py planta1.pdf --solo-limpio        # sin el relleno del escaneo en el archivo (más pequeño)
 python main.py planta1.pdf --grosor-muro 1.0    # espesor de muro en mm sobre el papel (si no, se mide solo)
 python main.py planta1.pdf --modo lineas        # solo líneas rectas (modo alterno)
@@ -244,8 +209,10 @@ la capa `TEXTOS_REVISAR`.
 ```
 planos2dwg/
 ├── main.py                 # Punto de entrada (CLI + selector de carpeta)
-├── abrir_app.bat           # Abre la ventana de chat (arrastra el PDF y listo)
-├── app.py                  # La ventana de chat (tkinter)
+├── abrir_app.bat           # Abre el programa de escritorio
+├── app.py                  # El programa de escritorio (tkinter)
+├── crear_acceso_directo.bat # Crea el acceso directo con logo en el escritorio
+├── assets/                 # Logo (png, ico) y su generador
 ├── convertir.bat           # Arrastra tus PDF aquí (hace todo solo)
 ├── instalar.bat            # Instalador de un clic
 ├── requirements.txt        # Dependencias de producción
@@ -262,7 +229,7 @@ planos2dwg/
 │   ├── ventanas.py         # Ventanas: huecos alineados en las dos caras de un muro con líneas dentro
 │   ├── deskew.py           # Enderezado de escaneos inclinados
 │   ├── orientacion.py      # Giro de página y cajetín detectados solos
-│   ├── gui_logic.py        # Lógica de la ventana: comando, archivos y mensajes amables (probada)
+│   ├── gui_logic.py        # Lógica de la ventana: comando, nombres de carpeta y mensajes (probada)
 │   ├── fotos.py            # Alinea fotos de partes del plano y suma los textos/cotas que se leen mejor en ellas
 │   ├── detalle.py          # Trazos de detalle de un solo trazo (esqueleto) de lo que no es muro/eje/arco/texto
 │   ├── centerline.py       # Adelgazado de la tinta a su línea central y recorrido del grafo

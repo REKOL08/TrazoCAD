@@ -18,8 +18,8 @@ _LOG_LINE = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d \[(\w+)\] (.*)$")
 class Options:
     """Lo que el usuario enciende o apaga con las fichas de la ventana."""
 
-    use_photos: bool = True
-    photos_dir: Path | None = None
+    photos: tuple[Path, ...] = ()
+    output_dir: Path | None = None
     read_text: bool = True
     show_scan_fill: bool = False
     keep_dxf: bool = False
@@ -63,11 +63,25 @@ def build_command(python: str, main_py: Path, pdf: Path, options: Options) -> li
         command.append("--conservar-dxf")
     if options.rotation in ROTATIONS and options.rotation != "auto":
         command += ["--rotar", options.rotation]
-    if not options.use_photos:
+    if options.photos:
+        for photo in options.photos:
+            command += ["--foto", str(photo)]
+    else:
         command.append("--sin-fotos")
-    elif options.photos_dir is not None:
-        command += ["--fotos", str(options.photos_dir)]
+    if options.output_dir is not None:
+        command += ["--salida", str(options.output_dir)]
     return command
+
+
+_INVALID_NAME_CHARS = re.compile(r'[\\/:*?"<>|]')
+
+
+def clean_folder_name(name: str, fallback: str) -> str:
+    """Un nombre válido de carpeta de Windows a partir de lo que escribió el usuario."""
+    cleaned = _INVALID_NAME_CHARS.sub("", name).strip().rstrip(". ")
+    if cleaned.upper() in {"CON", "PRN", "AUX", "NUL"} or re.fullmatch(r"(COM|LPT)\d", cleaned.upper() or "-"):
+        cleaned = ""
+    return cleaned or fallback
 
 
 # (fragmento del registro, clave de etapa, frase). Cada etapa se cuenta una sola vez.
