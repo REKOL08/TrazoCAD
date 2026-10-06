@@ -36,6 +36,7 @@ LAYER_AXES = "EJES"
 LAYER_ARCS = "ARCOS"
 LAYER_DOORS = "PUERTAS"
 LAYER_DETAIL = "DETALLE"
+LAYER_DASHED = "LINEAS_DISCONTINUAS"
 LAYER_FIXTURES = "SANITARIOS"
 LAYER_WINDOWS = "VENTANAS"
 TEXT_STYLE = "PLANOS"
@@ -49,7 +50,7 @@ MM_PER_INCH = 25.4
 
 
 _CLEAN_LAYERS = frozenset(
-    {"MUROS", "EJES", "ARCOS", "PUERTAS", "VENTANAS", "SANITARIOS", "TEXTOS", "TEXTOS_REVISAR", "COTAS", "DETALLE"}
+    {"MUROS", "EJES", "ARCOS", "PUERTAS", "VENTANAS", "SANITARIOS", "TEXTOS", "TEXTOS_REVISAR", "COTAS", "DETALLE", "LINEAS_DISCONTINUAS"}
 )
 
 
@@ -144,6 +145,7 @@ def build_dxf(
     document = ezdxf.new(dxfversion="R2010", setup=True, units=ezdxf.units.MM)
     document.header["$INSUNITS"] = ezdxf.units.MM
     document.header["$LWDISPLAY"] = 1  # que AutoCAD muestre los grosores de línea por capa
+    document.header["$LTSCALE"] = 0.25  # el plano está en mm de papel: los trazos de DASHED/CENTER (pensados para 1:1) se acortan
 
     if TEXT_STYLE not in document.styles:
         document.styles.add(TEXT_STYLE, font="arial.ttf")
@@ -163,6 +165,8 @@ def build_dxf(
         layers.add(name=LAYER_TEXT_REVIEW, color=30)
     if LAYER_DETAIL not in layers:
         layers.add(name=LAYER_DETAIL, color=7, lineweight=13)
+    if LAYER_DASHED not in layers:
+        layers.add(name=LAYER_DASHED, color=7, linetype="DASHED", lineweight=13)
     if LAYER_FIXTURES not in layers:
         layers.add(name=LAYER_FIXTURES, color=6, lineweight=18)
     if LAYER_WINDOWS not in layers:
@@ -222,7 +226,9 @@ def build_dxf(
 
     for stroke in detail:
         points = [to_mm(px, py) for px, py in stroke.points]
-        if not stroke.closed and len(points) == 2:
+        if stroke.dashed:
+            modelspace.add_line(points[0], points[1], dxfattribs={"layer": LAYER_DASHED})  # una línea con su tipo de línea
+        elif not stroke.closed and len(points) == 2:
             modelspace.add_line(points[0], points[1], dxfattribs={"layer": LAYER_DETAIL})
         else:
             modelspace.add_lwpolyline(points, close=stroke.closed, dxfattribs={"layer": LAYER_DETAIL})

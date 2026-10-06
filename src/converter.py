@@ -15,7 +15,7 @@ import numpy as np
 
 from .dwg_converter import convert_dxf_to_dwg
 from .deskew import deskew
-from .detalle import detect_detail_strokes, drop_debris
+from .detalle import detect_detail_strokes, drop_debris, drop_inside_fixtures
 from .dxf_writer import build_dxf
 from .line_detector import detect_lines, filter_short_segments, merge_collinear_segments
 from .muebles import detect_fixtures
@@ -337,6 +337,7 @@ def convert_pdf(
                 ]
                 detail = detect_detail_strokes(image, page.dpi, explained, texts + label_boxes, ignore_bottom_fraction=bottom)
                 detail = drop_debris(detail, _anchor_points(explained, texts, bubbles), page.dpi, image.shape[:2])
+                detail = drop_inside_fixtures(detail, fixtures)
                 if not clean_only:
                     shapes = _without_read_letters(trace_shapes(image, dpi=page.dpi), texts)
                     before = len(shapes)

@@ -69,19 +69,37 @@ def test_la_franja_del_cajetin_se_ignora() -> None:
     assert detect_detail_strokes(image, DPI, explained=[], texts=[], ignore_bottom_fraction=0.15) == []
 
 
-def test_las_rayas_cortas_de_una_linea_discontinua_se_conservan() -> None:
-    def rayas(im: np.ndarray) -> None:
-        for k in range(8):  # 8 rayas de ~0.6 mm (7 px) separadas ~1.7 mm, en una fila
-            x = 100 + 27 * k
-            cv2.line(im, (x, 300), (x + 7, 300), 0, 3)
+def test_las_rayas_alineadas_de_una_linea_discontinua_forman_una_sola_linea() -> None:
+    def dibujar(im):
+        for x in range(100, 400, 40):  # rayas de ~1.5 mm separadas ~1.7 mm, sobre una misma recta
+            cv2.line(im, (x, 300), (x + 18, 300), 0, 3)
 
-    image = _imagen(rayas)
+    trazos = detect_detail_strokes(_imagen(dibujar), DPI, explained=[], texts=[])
 
-    trazos = detect_detail_strokes(image, DPI, explained=[], texts=[])
+    assert len(trazos) == 1 and trazos[0].dashed  # una línea de trazos, no siete rayas sueltas
+    (x1, y1), (x2, y2) = trazos[0].points
+    assert abs(y1 - 300) < 3 and abs(y1 - y2) < 1.5 and abs(x2 - x1) > 250
 
-    assert len(trazos) >= 6  # no se tiran como si fueran motas
-    assert all(len(t.points) == 2 for t in trazos)
 
+def test_dos_rayas_solas_no_son_una_linea_discontinua() -> None:
+    def dibujar(im):
+        for x in (100, 140):
+            cv2.line(im, (x, 300), (x + 18, 300), 0, 3)
+
+    trazos = detect_detail_strokes(_imagen(dibujar), DPI, explained=[], texts=[])
+
+    assert not any(t.dashed for t in trazos)
+
+
+def test_un_garabato_pequeno_se_quita_y_una_curva_suave_pequena_se_conserva() -> None:
+    from src.centerline import Stroke
+    from src.detalle import drop_scribbles
+
+    px_mm = DPI / 25.4
+    garabato = Stroke([(100.0, 100.0), (108.0, 116.0), (116.0, 98.0), (124.0, 116.0), (132.0, 100.0)])  # zigzag
+    curva = Stroke([(200.0, 100.0), (212.0, 104.0), (222.0, 112.0), (228.0, 124.0), (230.0, 138.0)])  # arco suave
+
+    assert drop_scribbles([garabato, curva], px_mm) == [curva]
 
 def test_una_mota_aislada_sigue_siendo_ruido() -> None:
     image = _imagen(lambda im: cv2.line(im, (300, 300), (307, 300), 0, 3))
@@ -129,3 +147,17 @@ def test_sin_anclas_solo_se_quita_el_marco() -> None:
     trazo = Stroke([(1000.0, 1000.0), (1040.0, 1000.0)])
 
     assert drop_debris([trazo], np.empty((0, 2)), DPI, (2550, 3300)) == [trazo]
+
+
+def test_el_contorno_dentado_dentro_de_un_sanitario_se_quita_y_un_muro_cercano_no() -> None:
+    from src.centerline import Stroke
+    from src.detalle import drop_inside_fixtures
+    from src.muebles import Fixture
+
+    inodoro = Fixture("INODORO", 500.0, 500.0, 80.0, 60.0, 0.0)
+    contorno = Stroke([(480.0, 490.0), (500.0, 485.0), (520.0, 495.0), (515.0, 515.0)])  # dentro
+    muro = Stroke([(430.0, 440.0), (430.0, 640.0)])  # pasa al lado, fuera de la elipse
+    cruza = Stroke([(480.0, 500.0), (700.0, 500.0)])  # entra pero sale: no se toca
+
+    assert drop_inside_fixtures([contorno, muro, cruza], [inodoro]) == [muro, cruza]
+    assert drop_inside_fixtures([contorno], []) == [contorno]

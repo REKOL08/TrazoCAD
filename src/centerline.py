@@ -22,6 +22,7 @@ class Stroke:
 
     points: list[Point]
     closed: bool = False
+    dashed: bool = False  # una línea discontinua entera (varias rayas alineadas), no una raya suelta
 
 
 def skeletonize(ink: np.ndarray) -> np.ndarray:

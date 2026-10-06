@@ -69,6 +69,20 @@ def _entity_points(entity) -> list[tuple[float, float]]:
     return []
 
 
+def _dashed_line(draw, start: tuple[float, float], end: tuple[float, float], color, width: int, scale: float) -> None:
+    """Línea de trazos: raya de 3 mm y hueco de 1,5 mm sobre el papel (como el DASHED del DXF con LTSCALE 0,25)."""
+    length = math.dist(start, end)
+    if length == 0:
+        return
+    dash, gap = 3.2 * scale, 1.6 * scale
+    ux, uy = (end[0] - start[0]) / length, (end[1] - start[1]) / length
+    position = 0.0
+    while position < length:
+        stop = min(position + dash, length)
+        draw.line((start[0] + ux * position, start[1] + uy * position, start[0] + ux * stop, start[1] + uy * stop), fill=color, width=width)
+        position += dash + gap
+
+
 def render_dxf_preview(dxf_path: Path, output_png: Path, max_px: int = 2400) -> Path | None:
     """Dibuja el DXF en un PNG de lado mayor `max_px`. Devuelve la ruta, o None si no hay nada que dibujar."""
     doc = ezdxf.readfile(dxf_path)
@@ -98,7 +112,9 @@ def render_dxf_preview(dxf_path: Path, output_png: Path, max_px: int = 2400) -> 
         line_px = max(_layer_width(doc, layer) * scale, _MIN_LINE_PX * _SUPERSAMPLE)
         width_px = max(int(round(line_px)), 1)
         kind = entity.dxftype()
-        if kind in ("LINE", "LWPOLYLINE"):
+        if kind == "LINE" and layer == "LINEAS_DISCONTINUAS":
+            _dashed_line(draw, to_px(*_entity_points(entity)[0]), to_px(*_entity_points(entity)[1]), color, width_px, scale)
+        elif kind in ("LINE", "LWPOLYLINE"):
             pts = [to_px(x, y) for x, y in _entity_points(entity)]
             if kind == "LWPOLYLINE" and entity.closed and len(pts) > 2:
                 pts.append(pts[0])

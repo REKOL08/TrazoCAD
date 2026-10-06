@@ -38,6 +38,16 @@ _DASH_NEIGHBOUR_MM = 3.0
 _DASH_MIN_NEIGHBOURS = 2
 _JOIN_TOLERANCE_MM = 0.25
 _JOIN_MIN_COSINE = math.cos(math.radians(35))
+_DASH_LINE_ANGLE = math.sin(math.radians(2.5))  # rayas casi paralelas
+_DASH_LINE_OFFSET_PX = 3.0  # ...y sobre la misma recta
+_DASH_LINE_GAP_MM = 6.0  # separación máxima entre rayas seguidas de una misma línea (cubre los puntos del trazo y punto)
+_DASH_LINE_MIN_DASHES = 3
+_DASH_LINE_SHORT_MM = 10.0  # una recta más corta que esto puede ser una raya de una línea de trazos
+_SCRIBBLE_MAX_MM = 8.0  # un trazo abierto más corto que esto y retorcido es un resto de letra o de sombra
+_SCRIBBLE_MIN_POINTS = 4
+_SCRIBBLE_STRAIGHTNESS = 0.85
+_SCRIBBLE_MIN_REVERSALS = 2  # veces que el giro cambia de sentido: una curva suave no cambia nunca
+_SCRIBBLE_MIN_TURN_DEG = 30  # los giros menores son el temblor del esqueleto, no un cambio de sentido
 _DEBRIS_FAR_MM = 30.0  # un trazo corto a más de esto de todo lo reconocido (muros, ejes, textos...) es un resto suelto
 _DEBRIS_MAX_MM = 100.0
 _FRAME_EDGE_FRACTION = 0.06  # el marco de la hoja: una línea larga pegada al borde
@@ -126,6 +136,105 @@ def _join_strokes(strokes: list[Stroke], tolerance_px: float) -> list[Stroke]:
                 used.add(index)
         pieces = merged
     return [Stroke(points, False) for points in pieces] + closed
+
+
+def group_dashes(dashes: list[Stroke], px_per_mm: float) -> list[Stroke]:
+    """Une las rayas alineadas de una línea discontinua en UNA línea (marcada `dashed`), como la dibujaría un dibujante.
+
+    Tres o más rayas casi paralelas, sobre la misma recta y con huecos cortos entre ellas son una sola línea de trazos
+    o de trazo y punto. Las que no forman una cadena quedan como rayas sueltas.
+    """
+    if len(dashes) < _DASH_LINE_MIN_DASHES:
+        return dashes
+    gap_px = _DASH_LINE_GAP_MM * px_per_mm
+    items = []
+    for stroke in dashes:
+        (x1, y1), (x2, y2) = stroke.points[0], stroke.points[-1]
+        length = math.hypot(x2 - x1, y2 - y1)
+        if length > 0:
+            items.append((((x1 + x2) / 2, (y1 + y2) / 2), ((x2 - x1) / length, (y2 - y1) / length), stroke))
+
+    clusters: list[list[int]] = []
+    reference: list[tuple[tuple[float, float], tuple[float, float]]] = []  # (punto, dirección unitaria) por grupo
+    for index, (middle, direction, _) in enumerate(items):
+        for k, (point, u) in enumerate(reference):
+            if abs(u[0] * direction[1] - u[1] * direction[0]) > _DASH_LINE_ANGLE:
+                continue
+            if abs((middle[0] - point[0]) * -u[1] + (middle[1] - point[1]) * u[0]) <= _DASH_LINE_OFFSET_PX:
+                clusters[k].append(index)
+                break
+        else:
+            clusters.append([index])
+            reference.append((middle, direction))
+
+    result: list[Stroke] = []
+    grouped: set[int] = set()
+    for members, (point, u) in zip(clusters, reference):
+        if len(members) < _DASH_LINE_MIN_DASHES:
+            continue
+
+        def along(p: tuple[float, float]) -> float:
+            return (p[0] - point[0]) * u[0] + (p[1] - point[1]) * u[1]
+
+        spans = sorted(
+            (min(along(items[m][2].points[0]), along(items[m][2].points[-1])), max(along(items[m][2].points[0]), along(items[m][2].points[-1])), m)
+            for m in members
+        )
+        chain = [spans[0]]
+        chains = []
+        for span in spans[1:]:
+            if span[0] - chain[-1][1] <= gap_px:
+                chain.append((span[0], span[1], span[2]))
+            else:
+                chains.append(chain)
+                chain = [span]
+        chains.append(chain)
+        for chain in chains:
+            if len(chain) < _DASH_LINE_MIN_DASHES:
+                continue
+            offsets = [(items[m][0][0] - point[0]) * -u[1] + (items[m][0][1] - point[1]) * u[0] for _, _, m in chain]
+            offset = sum(offsets) / len(offsets)
+            low, high = min(c[0] for c in chain), max(c[1] for c in chain)
+            start = (point[0] + u[0] * low - u[1] * offset, point[1] + u[1] * low + u[0] * offset)
+            end = (point[0] + u[0] * high - u[1] * offset, point[1] + u[1] * high + u[0] * offset)
+            result.append(Stroke([start, end], dashed=True))
+            grouped.update(m for _, _, m in chain)
+    loose = [items[i][2] for i in range(len(items)) if i not in grouped]
+    return result + loose
+
+
+def _turn_reversals(points: list[tuple[float, float]]) -> int:
+    """Cuántas veces cambia de sentido el giro de una polilínea (ignorando los giros pequeños)."""
+    signs = []
+    for i in range(1, len(points) - 1):
+        ax, ay = points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]
+        bx, by = points[i + 1][0] - points[i][0], points[i + 1][1] - points[i][1]
+        angle = math.degrees(math.atan2(ax * by - ay * bx, ax * bx + ay * by))
+        if abs(angle) >= _SCRIBBLE_MIN_TURN_DEG:
+            signs.append(angle > 0)
+    return sum(1 for a, b in zip(signs, signs[1:]) if a != b)
+
+
+def drop_scribbles(strokes: list[Stroke], px_per_mm: float) -> list[Stroke]:
+    """Quita los garabatos: trazos abiertos, cortos y retorcidos (restos de letras que el OCR no leyó, de sombras...)."""
+    limit = _SCRIBBLE_MAX_MM * px_per_mm
+    kept: list[Stroke] = []
+    dropped = 0
+    for stroke in strokes:
+        points = stroke.points
+        if not stroke.closed and len(points) >= _SCRIBBLE_MIN_POINTS:
+            length = sum(math.dist(points[i], points[i + 1]) for i in range(len(points) - 1))
+            if (
+                length < limit
+                and math.dist(points[0], points[-1]) / max(length, 1e-9) < _SCRIBBLE_STRAIGHTNESS
+                and _turn_reversals(points) >= _SCRIBBLE_MIN_REVERSALS
+            ):
+                dropped += 1
+                continue
+        kept.append(stroke)
+    if dropped:
+        logger.info("Detalle: %d garabatos pequeños quitados.", dropped)
+    return kept
 
 
 def detect_detail_strokes(
@@ -219,9 +328,14 @@ def detect_detail_strokes(
     straight = [s for s in simplified if not s.closed and len(s.points) == 2]
     others = [s for s in simplified if s.closed or len(s.points) != 2]
     merged = merge_collinear_segments([(s.points[0], s.points[1]) for s in straight], dpi=dpi)
-    result = others + [Stroke([a, b]) for a, b in merged] + dashes
+    # las rectas cortas (las rayas de una línea de trazos que el esqueleto sí recogió) se agrupan igual que las rayas detectadas
+    short_limit = _DASH_LINE_SHORT_MM * px_per_mm
+    pieces = [Stroke([a, b]) for a, b in merged]
+    long_lines = [seg for seg in pieces if math.dist(seg.points[0], seg.points[1]) >= short_limit]
+    short_lines = [seg for seg in pieces if math.dist(seg.points[0], seg.points[1]) < short_limit]
+    result = drop_scribbles(others, px_per_mm) + long_lines + group_dashes(dashes + short_lines, px_per_mm)
 
-    logger.info("Detalle: %d trazos de un solo trazo (%d rectos, %d rayas de líneas discontinuas).", len(result), len(merged), len(dashes))
+    logger.info("Detalle: %d trazos (%d rectos, %d rayas en %d líneas discontinuas).", len(result), len(merged), len(dashes), sum(s.dashed for s in result))
     return result
 
 
@@ -261,4 +375,38 @@ def drop_debris(strokes: list[Stroke], anchors: np.ndarray, dpi: int, image_shap
                 continue
         kept.append(stroke)
     logger.info("Detalle: %d restos quitados (%d del marco de la hoja, %d sueltos lejos del plano).", dropped_frame + dropped_far, dropped_frame, dropped_far)
+    return kept
+
+
+_FIXTURE_REACH = 1.7  # los trazos dentro de la elipse de un sanitario (agrandada) son su contorno, ya dibujado limpio
+
+
+def drop_inside_fixtures(strokes: list[Stroke], fixtures: list) -> list[Stroke]:
+    """Quita los trazos que quedan dentro de la elipse de un sanitario detectado (su contorno dentado del escaneo).
+
+    Cada sanitario se dibuja como una elipse limpia en su capa; el contorno que el esqueleto sacó del escaneo sobraría.
+    Un trazo sale solo si TODOS sus puntos caen dentro (agrandada), para no tocar un muro que pasa al lado.
+    """
+    if not fixtures:
+        return strokes
+    kept: list[Stroke] = []
+    dropped = 0
+    for stroke in strokes:
+        inside = False
+        for f in fixtures:
+            theta = math.radians(f.angle_deg)
+            cos_t, sin_t = math.cos(theta), math.sin(theta)
+            a, b = _FIXTURE_REACH * f.major / 2, _FIXTURE_REACH * f.minor / 2
+            if all(
+                (((x - f.cx) * cos_t + (y - f.cy) * sin_t) / a) ** 2 + ((-(x - f.cx) * sin_t + (y - f.cy) * cos_t) / b) ** 2 <= 1.0
+                for x, y in stroke.points
+            ):
+                inside = True
+                break
+        if inside:
+            dropped += 1
+        else:
+            kept.append(stroke)
+    if dropped:
+        logger.info("Detalle: %d trazos dentro de sanitarios quitados (ya van como elipse).", dropped)
     return kept
