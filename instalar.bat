@@ -4,7 +4,7 @@ setlocal
 cd /d "%~dp0"
 
 echo ============================================
-echo  Instalando Planos2DWG
+echo  Instalando TrazoCAD
 echo ============================================
 echo.
 

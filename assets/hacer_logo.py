@@ -1,4 +1,4 @@
-"""Genera el logo (assets/logo.png y assets/planos2dwg.ico). Se ejecuta una vez: python assets/hacer_logo.py"""
+"""Genera el logo (assets/logo.png y assets/trazocad.ico). Se ejecuta una vez: python assets/hacer_logo.py"""
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter
@@ -74,5 +74,5 @@ if __name__ == "__main__":
     logo.resize((512, 512), Image.LANCZOS).save(HERE / "logo.png")
     logo.resize((44, 44), Image.LANCZOS).save(HERE / "logo_44.png")  # para la cabecera de la ventana
     sizes = [16, 24, 32, 48, 64, 128, 256]
-    logo.resize((256, 256), Image.LANCZOS).save(HERE / "planos2dwg.ico", sizes=[(s, s) for s in sizes])
+    logo.resize((256, 256), Image.LANCZOS).save(HERE / "trazocad.ico", sizes=[(s, s) for s in sizes])
     print("ok")

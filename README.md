@@ -1,4 +1,4 @@
-# Planos2DWG
+# TrazoCAD
 
 Convierte un plano escaneado en PDF en **un solo archivo de AutoCAD (`.dwg`)**,
 con el dibujo separado en capas: muros, ejes, puertas, ventanas, sanitarios,
@@ -6,12 +6,12 @@ textos editables y un calco de referencia del escaneo. Pensada para que un
 arquitecto o ingeniero sin experiencia en programación la instale en pocos
 minutos y la use así:
 
-> **Abre el programa «Planos a AutoCAD» (acceso directo del escritorio), arrastra el
+> **Abre el programa «TrazoCAD» (acceso directo del escritorio), arrastra el
 > PDF a la zona azul, ponle nombre a la carpeta y toca «Convertir a AutoCAD».** O, sin
 > ventana: arrastra el PDF sobre `convertir.bat`. El programa detecta solo si el plano
 > está de lado y dónde está el cajetín.
 
-## El programa de escritorio («Planos a AutoCAD»)
+## El programa de escritorio («TrazoCAD»)
 
 Una ventana normal de programa, con su logo, en cuatro pasos:
 
@@ -49,7 +49,7 @@ Casa Prueba 1/
 Desde la línea de comandos se activa con `--organizar` junto a `--salida`. Por dentro ejecuta el mismo `main.py` en un proceso
 aparte, así que el resultado es idéntico al de la línea de comandos.
 
-**Acceso directo con logo:** `crear_acceso_directo.bat` lo crea en tu escritorio («Planos a AutoCAD»).
+**Acceso directo con logo:** `crear_acceso_directo.bat` lo crea en tu escritorio («TrazoCAD»).
 También puedes abrir el programa con `abrir_app.bat`. El logo se regenera con `assets/hacer_logo.py`
 (necesita Pillow, solo para eso).
 
@@ -69,8 +69,8 @@ También puedes abrir el programa con `abrir_app.bat`. El logo se regenera con `
 1. **Clona o descarga este repositorio.**
 
    ```bash
-   git clone https://github.com/REKOL08/planos2dwg.git
-   cd planos2dwg
+   git clone https://github.com/REKOL08/TrazoCAD.git
+   cd TrazoCAD
    ```
 
    Si no usas Git, también puedes descargar el repositorio como ZIP desde
@@ -159,7 +159,7 @@ Antes:
   Planos/
     planta-primer-piso.pdf           <- tu PDF, en cualquier carpeta
 
-  planos2dwg/                        <- la carpeta de este programa
+  TrazoCAD/                        <- la carpeta de este programa
     convertir.bat
     main.py
     ...
@@ -168,7 +168,7 @@ Después de arrastrar planta-primer-piso.pdf sobre convertir.bat:
   Planos/
     planta-primer-piso.pdf           <- no se toca ni se mueve
 
-  planos2dwg/
+  TrazoCAD/
     convertir.bat
     main.py
     Convertidos_DWG/                 <- se crea aquí, no junto al PDF
@@ -228,7 +228,7 @@ la capa `TEXTOS_REVISAR`.
 ## Estructura del proyecto
 
 ```
-planos2dwg/
+TrazoCAD/
 ├── main.py                 # Punto de entrada (CLI + selector de carpeta)
 ├── abrir_app.bat           # Abre el programa de escritorio
 ├── app.py                  # El programa de escritorio (tkinter)

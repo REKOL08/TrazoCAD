@@ -5,7 +5,7 @@ from setuptools import find_packages, setup
 long_description = (Path(__file__).parent / "README.md").read_text(encoding="utf-8")
 
 setup(
-    name="planos2dwg",
+    name="trazocad",
     version="1.0.0",
     description="Convierte planos PDF escaneados a archivos DXF/DWG editables.",
     long_description=long_description,
@@ -21,7 +21,7 @@ setup(
     python_requires=">=3.10",
     entry_points={
         "console_scripts": [
-            "planos2dwg=main:main",
+            "trazocad=main:main",
         ],
     },
 )

@@ -1,4 +1,4 @@
-"""Planos a AutoCAD: programa de escritorio. Arrastra el PDF y se transforma en un .dwg.
+"""TrazoCAD: programa de escritorio. Arrastra el PDF y se transforma en un .dwg.
 
 Se abre con el acceso directo del escritorio o con `abrir_app.bat`. El trabajo lo hace `main.py` en
 un proceso aparte, para poder detenerlo sin cerrar la ventana.
@@ -35,7 +35,7 @@ except Exception:  # pragma: no cover - depende de la instalación
     HAS_DND = False
 
 ASSETS = PROJECT_ROOT / "assets"
-APP_ID = "Planos2DWG.Convertidor"
+APP_ID = "TrazoCAD.Convertidor"
 
 NAVY = "#0d3b8e"
 BLUE = "#1f6feb"
@@ -58,7 +58,7 @@ FONT_S = ("Segoe UI", 9)
 class App(_BaseWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Planos a AutoCAD")
+        self.title("TrazoCAD")
         self.configure(bg=BG)
         self.minsize(820, 600)
         self.geometry(f"880x{min(700, max(600, self.winfo_screenheight() - 80))}+80+10")
@@ -114,7 +114,7 @@ class App(_BaseWindow):
         except Exception:
             pass
         try:
-            self.iconbitmap(default=str(ASSETS / "planos2dwg.ico"))
+            self.iconbitmap(default=str(ASSETS / "trazocad.ico"))
         except Exception:
             pass
 
@@ -128,9 +128,9 @@ class App(_BaseWindow):
             self.logo = None
         titles = tk.Frame(bar, bg=NAVY)
         titles.pack(side="left", pady=6)
-        tk.Label(titles, text="Planos a AutoCAD", bg=NAVY, fg="white", font=("Segoe UI", 15, "bold")).pack(anchor="w")
+        tk.Label(titles, text="TrazoCAD", bg=NAVY, fg="white", font=("Segoe UI", 15, "bold")).pack(anchor="w")
         tk.Label(
-            titles, text="Convierte un plano escaneado (PDF) en un archivo .dwg editable", bg=NAVY, fg="#b9cdf5", font=FONT_S
+            titles, text="Del papel al DWG: convierte un plano escaneado (PDF) en un archivo de AutoCAD editable", bg=NAVY, fg="#b9cdf5", font=FONT_S
         ).pack(anchor="w")
 
     def _card(self, parent: tk.Widget, number: str, title: str) -> tk.Frame:
@@ -303,7 +303,7 @@ class App(_BaseWindow):
     def _set_pdfs(self, paths: list[str]) -> None:
         pdfs, ignored = collect_pdfs(paths)
         if not pdfs:
-            messagebox.showinfo("Planos a AutoCAD", "Eso no es un PDF. Arrastra tu plano escaneado en formato PDF.")
+            messagebox.showinfo("TrazoCAD", "Eso no es un PDF. Arrastra tu plano escaneado en formato PDF.")
             return
         self.pdfs = pdfs
         if not self.name_touched:
@@ -411,14 +411,14 @@ class App(_BaseWindow):
             self._stop()
             return
         if not self.pdfs:
-            messagebox.showinfo("Planos a AutoCAD", "Primero arrastra tu plano en PDF a la zona azul.")
+            messagebox.showinfo("TrazoCAD", "Primero arrastra tu plano en PDF a la zona azul.")
             return
         out_dir = self._target_dir()
         existed = out_dir.exists()
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            messagebox.showerror("Planos a AutoCAD", f"No pude crear la carpeta:\n{out_dir}\n\n{exc}")
+            messagebox.showerror("TrazoCAD", f"No pude crear la carpeta:\n{out_dir}\n\n{exc}")
             return
         self.out_dir = out_dir
         self.outputs = []
@@ -584,7 +584,7 @@ class App(_BaseWindow):
         if target.is_dir():
             os.startfile(target)  # type: ignore[attr-defined]
         else:
-            messagebox.showinfo("Planos a AutoCAD", "Esa carpeta no se creó en esta conversión (por ejemplo, no había fotos que coincidieran).")
+            messagebox.showinfo("TrazoCAD", "Esa carpeta no se creó en esta conversión (por ejemplo, no había fotos que coincidieran).")
 
     def _open_viewer(self) -> None:
         items: list[tuple[str, Path]] = []
@@ -593,7 +593,7 @@ class App(_BaseWindow):
             items.append((f"{kind} — {path.stem.rsplit('_', 1)[0]}", path))
         items += [(f"Foto usada — {path.name}", path) for path in self.photos_used if path.exists()]
         if not items:
-            messagebox.showinfo("Planos a AutoCAD", "No hay vistas previas para mostrar.")
+            messagebox.showinfo("TrazoCAD", "No hay vistas previas para mostrar.")
             return
         ImageViewer(self, items)
 
