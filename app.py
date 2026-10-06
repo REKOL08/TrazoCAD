@@ -168,7 +168,7 @@ class App(_BaseWindow):
         card.grid(row=1, column=0, sticky="nsew")
         tk.Label(
             card,
-            text="Fotos de partes del mismo plano: ayudan a leer mejor las cotas y los textos pequeños.",
+            text="Fotos de partes del mismo plano: se fusionan con el escaneo y dan más detalle: líneas más finas y cotas legibles.",
             bg=CARD, fg=GRAY, font=FONT_S, anchor="w", wraplength=430, justify="left",
         ).pack(fill="x", padx=14)
         row = tk.Frame(card, bg=CARD)
@@ -428,8 +428,6 @@ class App(_BaseWindow):
         self._hide_result()
         self._clear_log()
         self._log(("Se usará la carpeta existente: " if existed else "Carpeta creada: ") + str(out_dir), "ok")
-        if self.photos and not self.read_text.get():
-            self._log("Ojo: las fotos solo se usan si 'Leer textos y cotas' está activado.", "warn")
         self.jobs = list(self.pdfs)
         self._set_busy(True)
         self._next_job()

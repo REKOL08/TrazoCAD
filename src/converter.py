@@ -25,7 +25,7 @@ from .puertas import detect_doors
 from .ventanas import detect_windows
 from .vectorizer import binarize_ink
 from .pdf_processor import render_pdf_pages
-from .fotos import merge_texts, read_photo_texts, register_photos
+from .fotos import fuse_photos, register_photos
 from .organizar import FOLDER_PDF, FOLDER_PHOTOS, FOLDER_PLAN, FOLDER_PREVIEW, copy_unique, save_scan_preview, write_readme
 from .texto import TextItem, read_texts
 from .vista_previa import render_dxf_preview
@@ -158,22 +158,6 @@ def _deliver(dxf_path: Path, output_dir: Path, generate_dwg: bool, keep_dxf: boo
     return [_copy_replacing(dxf_path, output_dir / dxf_path.name)]
 
 
-def _with_photo_texts(
-    texts: list[TextItem], image, bottom: float, photos: list[Path] | None
-) -> tuple[list[TextItem], list[Path]]:
-    """Suma a los textos del escaneo los que se leen mejor en las fotos de partes del plano.
-
-    Devuelve los textos y las fotos que sí coincidieron con el plano.
-    """
-    if not photos:
-        return texts, []
-    registered = register_photos(image, photos)
-    if not registered:
-        return texts, []
-    merged = merge_texts(texts, read_photo_texts(registered), image.shape[:2], bottom)
-    return merged, [photo.path for photo in registered]
-
-
 def _make_previews(dxf_path: Path, image, preview_dir: Path, stem: str) -> list[Path]:
     """Imagen del resultado (dibujada desde el DXF) y del escaneo enderezado. Un fallo no tumba la conversión."""
     made: list[Path] = []
@@ -231,8 +215,8 @@ def convert_pdf(
     """Convierte un único PDF en un archivo de AutoCAD por página (.dwg, o .dxf sin ODA).
 
     `rotation` e `ignore_bottom_fraction` en None se detectan solos (giro de página y cajetín).
-    `photos`: fotos de partes del plano; las que coinciden con él se usan para leer mejor los
-    textos y las cotas (las que no, se ignoran).
+    `photos`: fotos de partes del plano; las que coinciden con él se fusionan con el escaneo para
+    ganar detalle en muros, líneas, textos y cotas (las que no coinciden, se ignoran).
     `organize`: ordena `output_dir` en subcarpetas (plano, vista previa, fotos usadas, PDF original).
 
     No lanza excepciones hacia el llamador: cualquier error se captura y se
@@ -253,6 +237,10 @@ def convert_pdf(
             _warn_if_low_resolution(pdf_path.name, page.native_dpi)
             page_rotation = detect_rotation(page.image, page.dpi) if rotation is None else rotation
             image = deskew(rotate_image(page.image, page_rotation), page.dpi)
+            registered = register_photos(image, photos) if photos else []
+            if registered:
+                image = fuse_photos(image, registered)
+                photos_used.extend(r.path for r in registered if r.path not in photos_used)
             bottom = detect_title_block_fraction(image, page.dpi) if ignore_bottom_fraction is None else ignore_bottom_fraction
             segments: list = []
             polylines: list = []
@@ -285,8 +273,6 @@ def convert_pdf(
                 )
                 if read_text:
                     texts = read_texts(image, ignore_bottom_fraction=bottom)
-                    texts, used = _with_photo_texts(texts, image, bottom, photos)
-                    photos_used.extend(p for p in used if p not in photos_used)
                 fixtures = detect_fixtures(image, page.dpi, texts, wall_thickness_px=thickness)
                 explained = (
                     list(walls)

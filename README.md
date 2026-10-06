@@ -20,8 +20,8 @@ Una ventana normal de programa, con su logo, en cuatro pasos:
    generar nada, dentro de `Convertidos_DWG` (o la carpeta que elijas con «Cambiar…»). Por defecto
    lleva el nombre del PDF. Debajo ves la ruta exacta que se va a crear.
 3. **Fotos para más precisión (opcional):** «Agregar fotos…» (o suéltalas en la ventana) con fotos de
-   partes del mismo plano; ayudan a leer mejor las cotas y los textos pequeños. Las fotos de otro plano
-   se ignoran solas.
+   partes del mismo plano; se fusionan con el escaneo y dan más detalle en muros, líneas, textos y cotas. Las fotos de
+   otro plano se ignoran solas.
 4. **Opciones:** leer textos y cotas, guardar también un `.dxf`, mostrar el escaneo gris de fondo y giro
    del plano (automático, 90°, 180°, 270°).
 
@@ -206,24 +206,23 @@ La carpeta `planos_de_prueba/` es para dejar los planos con los que quieres afin
 a mano). **Su contenido no se sube a GitHub** (solo el `LEEME.txt`), porque los planos pueden ser
 confidenciales. Detalles en `planos_de_prueba/LEEME.txt`.
 
-### Fotos de partes del plano (mejoran la lectura de cotas y textos)
+### Fotos de partes del plano (más detalle en todo el dibujo)
 
-Si el escaneo es de baja resolución (150 dpi), las cotas pequeñas no se leen. Una **foto de celular
-de un trozo del mismo plano** tiene mucha más resolución efectiva en esa zona. Déjalas en
-`planos_de_prueba/` (o indica otra carpeta con `--fotos`) y el convertidor las usa solo:
+Un escaneo de 150 dpi pierde los trazos finos y las cotas pequeñas. Una **foto de celular de un trozo del
+mismo plano** es 2 o 3 veces más nítida en esa zona. Déjalas en `planos_de_prueba/` (o agrégalas en el programa,
+o usa `--foto`) y el convertidor las **fusiona con el escaneo**:
 
-1. Alinea cada foto con el plano (puntos SIFT sin sombras, homografía con RANSAC, prueba los 4
-   giros). La foto puede estar girada, torcida o con sombras. Las fotos de **otro** plano o sin
-   coincidencias se descartan solas, igual que las repetidas.
-2. Lee sus textos con el mismo OCR, descarta el borde de la foto (desenfocado) y lleva cada texto al
-   marco del plano. Las cotas que el OCR confundía (`RO.85`, `z.05`) se corrigen.
-3. Suma lo que el escaneo no leyó y se queda con la mejor lectura cuando ambos leen lo mismo.
+1. Alinea cada foto con el plano (puntos SIFT sin sombras, homografía con RANSAC, prueba los 4 giros). La foto
+   puede estar girada, torcida o con sombras. Las fotos de **otro** plano o sin coincidencias se descartan solas,
+   igual que las repetidas.
+2. Pone la parte útil de cada foto (sin el borde, que sale desenfocado) en el lugar que le corresponde, igualando
+   los tonos y difuminando el empalme. Donde no hay foto, el escaneo queda tal cual.
+3. Todo el programa trabaja después sobre esa imagen fusionada: muros, ejes, puertas, textos y detalle.
 
-Con las 3 fotos del plano de prueba los textos pasaron de **64 a 129** (y las cotas de ~13 a ~55).
-Cuesta unos 2-3 minutos extra por plano (OCR de cada foto). Limites: solo mejora las zonas que
-cubren las fotos; no cambia la geometría (muros, arcos...), que sigue saliendo del escaneo; las
-sombras fuertes o los dobleces del papel pueden dar lecturas erróneas, por eso hay que revisar
-la capa `TEXTOS_REVISAR`.
+En el plano de prueba (3 fotos, 26 % de la hoja cubierta) el resultado fue: muros 96 → 119, ejes 19 → 25,
+puertas 4 → 6, textos 64 → 144 y cotas leídas 8 → 62. Fusionar es además más rápido que leer cada foto aparte.
+Límites: solo mejora lo que cubren las fotos; los dobleces, las sombras fuertes o un lente muy deformado pueden dejar
+pequeños desajustes en el empalme; no sustituye un escaneo de 300-400 dpi.
 
 ## Estructura del proyecto
 

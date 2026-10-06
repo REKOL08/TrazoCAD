@@ -1,24 +1,22 @@
-"""Fotos de partes del plano como fuente extra de lectura.
+"""Fotos de partes del plano para ganar detalle: se **fusionan** con el escaneo.
 
-Un escaneo de 150 dpi no deja leer las cotas pequeñas; una foto de celular de un trozo del
-mismo plano tiene el doble de resolución efectiva en esa zona. Cada foto se **registra** contra
-el plano (puntos SIFT sobre imágenes sin sombras, homografía con RANSAC, se prueban los 4 giros),
-se lee su texto con el mismo OCR y las cajas se llevan, con la homografía, al marco del plano.
-Las fotos que no corresponden a este plano no encuentran coincidencias y se descartan.
+Un escaneo de 150 dpi pierde las cotas pequeñas y los trazos finos; una foto de celular de un trozo del
+mismo plano es 2 o 3 veces más nítida en esa zona. Cada foto se **registra** contra el plano (puntos SIFT
+sobre imágenes sin sombras, homografía con RANSAC, se prueban los 4 giros) y su zona útil reemplaza ese
+trozo del escaneo, con los tonos igualados y un borde difuminado. Todo el programa (muros, puertas, textos,
+detalle) trabaja después sobre la imagen fusionada. Las fotos que no corresponden a este plano no encuentran
+coincidencias y se descartan.
 """
 
 from __future__ import annotations
 
 import hashlib
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 import numpy as np
-
-from .texto import TextItem, _bbox_iou, _contained, _upright_quad, correct_spanish, read_texts
 
 logger = logging.getLogger("planos2dwg")
 
@@ -27,13 +25,12 @@ _MIN_INLIERS = 40
 _MIN_INLIER_RATIO = 0.25
 _RATIO_TEST = 0.78
 _RANSAC_PX = 6.0
-_EDGE_MARGIN = 0.04  # el borde de la foto está más desenfocado y deformado
 _SCALE_RANGE = (0.4, 3.0)
 _MAX_FEATURES = 12000
 _BACKGROUND_KERNEL = 51
-_OVERLAP_IOU = 0.30
-_PHOTO_MIN_CONFIDENCE = 0.80
-_MEASURE_TEXT = re.compile(r"^(R?\d{1,2}[.,]\d{1,2}|-?\d[.,]\d{1,2}m)$")
+_INNER_MARGIN = 0.07  # el borde de la foto está más desenfocado y deformado: no se usa
+_FEATHER_PX = 40.0  # ancho del degradado entre la foto y el escaneo
+_MIN_ZONE_PX = 20000
 
 
 @dataclass
@@ -131,61 +128,45 @@ def register_photos(reference: np.ndarray, photos: list[Path]) -> list[Registere
     return registered
 
 
-def _credible(item: TextItem) -> bool:
-    """Una lectura de foto se acepta si es una cota, una palabra del vocabulario o muy segura."""
-    _, known = correct_spanish(item.text)
-    return known or bool(_MEASURE_TEXT.match(item.text)) or item.confidence >= _PHOTO_MIN_CONFIDENCE
+def _tone_matched(source: np.ndarray, reference: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Lleva los tonos de `source` a los de `reference` (por percentiles) mirando solo la máscara."""
+    levels = np.linspace(0, 100, 101)
+    source_q = np.maximum.accumulate(np.percentile(source[mask > 0], levels))
+    reference_q = np.percentile(reference[mask > 0], levels)
+    table = np.interp(np.arange(256), source_q, reference_q).astype(np.uint8)
+    return table[source]
 
 
-def _to_plan(item: TextItem, photo: RegisteredPhoto) -> TextItem | None:
-    """Lleva el texto de la foto al marco del plano; None si cae en el borde o fuera."""
-    h, w = photo.gray.shape
-    centre = item.quad.mean(axis=0)
-    if not (_EDGE_MARGIN * w <= centre[0] <= (1 - _EDGE_MARGIN) * w
-            and _EDGE_MARGIN * h <= centre[1] <= (1 - _EDGE_MARGIN) * h):
-        return None
-    quad = cv2.perspectiveTransform(item.quad.astype(np.float32).reshape(-1, 1, 2), photo.homography).reshape(4, 2)
-    return TextItem(item.text, item.confidence, _upright_quad(quad.astype(np.float64), item.text), item.sure)
+def fuse_photos(plan: np.ndarray, photos: list[RegisteredPhoto]) -> np.ndarray:
+    """Devuelve `plan` (gris) con la zona útil de cada foto puesta encima, con los tonos igualados.
 
-
-def read_photo_texts(photos: list[RegisteredPhoto]) -> list[TextItem]:
-    """Lee el texto de cada foto y lo devuelve en coordenadas del plano."""
-    found: list[TextItem] = []
-    for photo in photos:
-        flat = _flatten(photo.gray)
-        items = read_texts(flat)
-        mapped = [m for m in (_to_plan(i, photo) for i in items if _credible(i)) if m is not None]
-        logger.info("Foto '%s': %d textos leídos (%d dentro de su zona útil).", photo.path.name, len(items), len(mapped))
-        found.extend(mapped)
-    return found
-
-
-def merge_texts(scan: list[TextItem], extra: list[TextItem], image_shape: tuple[int, int], bottom_fraction: float = 0.0) -> list[TextItem]:
-    """Suma las lecturas de las fotos a las del escaneo.
-
-    Un texto de foto que no coincide con ninguno del escaneo se agrega; si coincide con uno,
-    se queda el de mayor confianza (solo si la foto lo lee con seguridad).
+    Las partes que ninguna foto cubre quedan exactamente como en el escaneo.
     """
-    height, width = image_shape
-    limit = height * (1 - bottom_fraction)
-    merged = list(scan)
-    added = replaced = 0
-    for item in extra:
-        cx, cy = item.quad.mean(axis=0)
-        if not (0 <= cx < width and 0 <= cy < limit):
+    if not photos:
+        return plan
+    height, width = plan.shape
+    plan_flat = _flatten(plan)
+    fused = plan.copy()
+    best_weight = np.zeros((height, width), np.float32)
+    covered = 0.0
+
+    for photo in photos:
+        photo_h, photo_w = photo.gray.shape
+        useful = np.full((photo_h, photo_w), 255, np.uint8)
+        margin = int(_INNER_MARGIN * min(photo_h, photo_w))
+        useful[:margin] = useful[-margin:] = 0
+        useful[:, :margin] = useful[:, -margin:] = 0
+        zone = cv2.warpPerspective(useful, photo.homography, (width, height), flags=cv2.INTER_NEAREST)
+        if int((zone > 0).sum()) < _MIN_ZONE_PX:
             continue
-        overlapping = [
-            i for i, other in enumerate(merged)
-            if _bbox_iou(item.quad, other.quad) >= _OVERLAP_IOU
-            or _contained(item.quad, other.quad) or _contained(other.quad, item.quad)
-        ]
-        if not overlapping:
-            merged.append(item)
-            added += 1
-            continue
-        current = [merged[i] for i in overlapping]
-        if item.sure and item.confidence > max(c.confidence for c in current) and len(overlapping) == 1:
-            merged[overlapping[0]] = item
-            replaced += 1
-    logger.info("Fotos: %d textos nuevos y %d lecturas mejoradas respecto al escaneo.", added, replaced)
-    return merged
+        warped = cv2.warpPerspective(_flatten(photo.gray), photo.homography, (width, height), flags=cv2.INTER_CUBIC, borderValue=255)
+        matched = _tone_matched(warped, plan_flat, zone)
+        weight = np.clip(cv2.distanceTransform((zone > 0).astype(np.uint8), cv2.DIST_L2, 3) / _FEATHER_PX, 0.0, 1.0)
+        wins = weight > best_weight
+        blended = fused.astype(np.float32) * (1.0 - weight) + matched.astype(np.float32) * weight
+        fused = np.where(wins, blended, fused).astype(np.uint8)
+        best_weight = np.maximum(best_weight, weight)
+
+    covered = float((best_weight > 0.99).mean())
+    logger.info("Fotos: %d fusionadas con el escaneo (%.0f%% de la hoja con más detalle).", len(photos), 100 * covered)
+    return fused

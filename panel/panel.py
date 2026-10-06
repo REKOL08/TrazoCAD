@@ -18,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE = Path(__file__).resolve().parent / "estado.json"
+LOG = Path(__file__).resolve().parent / "actividad.log"  # texto plano: se puede abrir en el editor y se refresca solo
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 MAX_EVENTS = 200
 MAX_PER_GROUP = 24
@@ -64,6 +65,12 @@ def _save(state: dict) -> None:
     STATE.write_text(json.dumps(state, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
+def _log_line(kind: str, text: str, detail: str = "") -> None:
+    mark = {"hecho": "[OK]   ", "error": "[ERROR]", "curso": "[...]  ", "info": "[info] "}.get(kind, "[info] ")
+    with LOG.open("a", encoding="utf-8") as handle:
+        handle.write(f"{time.strftime('%H:%M:%S')} {mark} {text}" + (f"  ({detail})" if detail else "") + "\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -84,11 +91,14 @@ def main() -> None:
     now = time.strftime("%H:%M:%S")
     if args.cmd == "ahora":
         state["ahora"] = {"texto": args.texto, "estado": args.estado}
+        _log_line(args.estado, "AHORA: " + args.texto)
     elif args.cmd == "evento":
         state["eventos"].insert(0, {"hora": now, "texto": args.texto, "estado": args.estado, "detalle": args.detalle})
         state["eventos"] = state["eventos"][:MAX_EVENTS]
+        _log_line(args.estado, args.texto, args.detalle)
     elif args.cmd == "dato":
         state["datos"][args.nombre] = args.valor
+        _log_line("info", f"{args.nombre}: {args.valor}")
     _save(state)
 
 

@@ -3,8 +3,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from src.fotos import find_photos, merge_texts, register_photos, unique_photos
-from src.texto import TextItem, correct_spanish
+from src.fotos import find_photos, fuse_photos, register_photos, unique_photos
+from src.texto import correct_spanish
 
 
 def _caja(x: float, y: float, w: float = 80, h: float = 30) -> np.ndarray:
@@ -73,23 +73,28 @@ def test_una_foto_de_otro_plano_se_descarta(tmp_path: Path) -> None:
     assert register_photos(plano, [tmp_path / "otra.png"]) == []
 
 
-def test_un_texto_nuevo_de_la_foto_se_agrega_y_uno_repetido_no() -> None:
-    escaneo = [TextItem("COCINA", 0.7, _caja(100, 100), True)]
-    de_foto = [
-        TextItem("COCINA", 0.9, _caja(102, 101), True),   # mismo lugar, mejor lectura
-        TextItem("1.80", 0.8, _caja(500, 500), True),     # texto que el escaneo no leyó
-    ]
+def test_la_fusion_da_mas_detalle_solo_donde_hay_foto(tmp_path: Path) -> None:
+    nitido = _plano_con_textura()
+    escaneo = cv2.GaussianBlur(nitido, (0, 0), 2.2)  # el escaneo de baja resolución pierde detalle
+    trozo = nitido[300:1100, 400:1300]
+    cv2.imwrite(str(tmp_path / "foto.png"), np.ascontiguousarray(np.rot90(trozo, 1)))
+    registradas = register_photos(escaneo, [tmp_path / "foto.png"])
+    assert len(registradas) == 1
 
-    resultado = merge_texts(escaneo, de_foto, (1000, 1000))
+    fusionado = fuse_photos(escaneo, registradas)
 
-    assert sorted(t.text for t in resultado) == ["1.80", "COCINA"]
-    assert [t.confidence for t in resultado if t.text == "COCINA"] == [0.9]
+    nitidez = lambda im, zona: float(cv2.Laplacian(im, cv2.CV_32F)[zona].var())  # noqa: E731
+    dentro = (slice(500, 900), slice(600, 1100))
+    assert nitidez(fusionado, dentro) > 1.5 * nitidez(escaneo, dentro)
+    # lejos de la foto el escaneo queda exactamente igual
+    assert np.array_equal(fusionado[:150, :], escaneo[:150, :])
+    assert np.array_equal(fusionado[:, 1500:], escaneo[:, 1500:])
 
 
-def test_la_franja_del_cajetin_no_recibe_textos_de_fotos() -> None:
-    de_foto = [TextItem("1.80", 0.8, _caja(500, 950), True)]
+def test_sin_fotos_la_fusion_devuelve_el_escaneo_tal_cual() -> None:
+    escaneo = np.full((100, 100), 200, np.uint8)
 
-    assert merge_texts([], de_foto, (1000, 1000), bottom_fraction=0.15) == []
+    assert fuse_photos(escaneo, []) is escaneo
 
 
 def test_las_cotas_con_letras_por_cifras_se_arreglan() -> None:
