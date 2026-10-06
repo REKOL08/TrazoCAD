@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TrazoCAD · Panel de avance</title>
+<style>
+  :root {
+    --bg: #f2f5fa; --card: #ffffff; --line: #d6deea; --ink: #1f2a3a; --gray: #6b7a90;
+    --blue: #1f6feb; --navy: #0d3b8e; --green: #1e9e55; --red: #d64545; --amber: #b07a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #11151c; --card: #1a212c; --line: #2b3646; --ink: #e6ecf5; --gray: #93a2b8; --blue: #5b9bff; --navy: #0b2a66; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 "Segoe UI", system-ui, sans-serif; }
+  header { background: var(--navy); color: #fff; padding: 14px 24px; display: flex; align-items: center; gap: 14px; }
+  header img { width: 44px; height: 44px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 0; font-size: 13px; color: #b9cdf5; }
+  header .live { margin-left: auto; font-size: 13px; color: #b9cdf5; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #3fbf5f; animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  main { max-width: 1280px; margin: 0 auto; padding: 20px 24px 60px; display: grid; gap: 18px; }
+  .now { background: var(--card); border: 1px solid var(--line); border-left: 6px solid var(--blue); border-radius: 12px; padding: 16px 20px; }
+  .now small { color: var(--gray); text-transform: uppercase; letter-spacing: .06em; font-size: 11px; }
+  .now strong { display: block; font-size: 20px; margin-top: 2px; }
+  .now.hecho { border-left-color: var(--green); } .now.error { border-left-color: var(--red); } .now.info { border-left-color: var(--gray); }
+  .cols { display: grid; grid-template-columns: 1.1fr 1fr; gap: 18px; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 20px; }
+  h2 { margin: 0 0 10px; font-size: 16px; }
+  ul.timeline { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow: auto; }
+  ul.timeline li { display: grid; grid-template-columns: 64px 22px 1fr; gap: 6px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+  ul.timeline time { color: var(--gray); font-size: 12px; padding-top: 2px; }
+  ul.timeline .d { font-size: 12px; color: var(--gray); }
+  .st-hecho { color: var(--green); } .st-error { color: var(--red); } .st-curso { color: var(--blue); } .st-info { color: var(--gray); }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 8px 4px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td:last-child { text-align: right; font-weight: 600; }
+  .empty { color: var(--gray); font-size: 14px; }
+  .group h3 { margin: 4px 0 10px; font-size: 14px; color: var(--gray); font-weight: 600; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+  figure { margin: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; cursor: zoom-in; }
+  figure img { width: 100%; height: 160px; object-fit: contain; display: block; background: #fff; }
+  figcaption { padding: 6px 10px; font-size: 12px; color: var(--gray); border-top: 1px solid var(--line); background: var(--card); word-break: break-word; }
+  #box { position: fixed; inset: 0; background: rgba(8, 12, 20, .92); display: none; align-items: center; justify-content: center; z-index: 10; cursor: zoom-out; }
+  #box img { max-width: 96vw; max-height: 94vh; background: #fff; }
+</style>
+</head>
+<body>
+<header>
+  <img src="../assets/logo_44.png" alt="">
+  <div><h1>TrazoCAD · Panel de avance</h1><p>Lo que se va haciendo y lo que se va generando, en vivo</p></div>
+  <div class="live"><span class="dot"></span><span id="upd">conectando…</span></div>
+</header>
+<main>
+  <div class="now" id="now"><small>Ahora mismo</small><strong id="nowText">Esperando…</strong></div>
+  <div class="cols">
+    <section><h2>Línea de tiempo</h2><ul class="timeline" id="timeline"></ul></section>
+    <section><h2>Tablero</h2><table id="datos"></table></section>
+  </div>
+  <section><h2>Lo que se va generando</h2><div id="gallery"></div></section>
+</main>
+<div id="box"><img alt=""></div>
+<script>
+const ICON = { hecho: "✔", error: "✖", curso: "⏳", info: "•" };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const box = document.getElementById("box");
+box.onclick = () => { box.style.display = "none"; };
+
+async function refresh() {
+  try {
+    const r = await fetch("estado.json?t=" + Date.now(), { cache: "no-store" });
+    const s = await r.json();
+    document.getElementById("upd").textContent = "actualizado " + (s.actualizado || "—");
+    const now = document.getElementById("now");
+    now.className = "now " + (s.ahora?.estado || "info");
+    document.getElementById("nowText").textContent = s.ahora?.texto || "";
+    document.getElementById("timeline").innerHTML = (s.eventos || []).map(e =>
+      `<li><time>${esc(e.hora)}</time><span class="st-${e.estado}">${ICON[e.estado] || "•"}</span>` +
+      `<div>${esc(e.texto)}${e.detalle ? `<div class="d">${esc(e.detalle)}</div>` : ""}</div></li>`
+    ).join("") || '<li class="empty">Todavía no hay eventos.</li>';
+    const datos = Object.entries(s.datos || {});
+    document.getElementById("datos").innerHTML = datos.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")
+      || '<tr><td class="empty">Sin cifras todavía.</td></tr>';
+    document.getElementById("gallery").innerHTML = (s.galeria || []).map(g =>
+      `<div class="group"><h3>${esc(g.grupo)}</h3><div class="grid">` +
+      g.items.map(i => `<figure data-src="../${esc(i.ruta)}?v=${i.mtime}"><img loading="lazy" src="../${esc(i.ruta)}?v=${i.mtime}" alt="">` +
+        `<figcaption>${esc(i.titulo)}</figcaption></figure>`).join("") + `</div></div>`
+    ).join("") || '<p class="empty">Aún no hay imágenes. Aparecerán aquí cuando se generen.</p>';
+    document.querySelectorAll("figure").forEach(f => f.onclick = () => {
+      box.querySelector("img").src = f.dataset.src; box.style.display = "flex";
+    });
+  } catch (e) {
+    document.getElementById("upd").textContent = "sin conexión con el servidor";
+  }
+}
+refresh();
+setInterval(refresh, 2500);
+</script>
+</body>
+</html>

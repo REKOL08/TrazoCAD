@@ -41,3 +41,10 @@ Convertidos_DWG/
 planos_de_prueba/*
 !planos_de_prueba/LEEME.txt
 ESTADO-DEL-PROYECTO.md
+
+# Panel de avance y pruebas de vision (contienen el plano del usuario)
+panel/estado.json
+experimentos/resultados/
+modelos/
+panel/RELEVO.md
+experimentos/entorno_vision/
